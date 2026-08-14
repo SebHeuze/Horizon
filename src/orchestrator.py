@@ -14,6 +14,7 @@ from .console_icons import get_icons
 from .models import Config, ContentItem
 from .storage.manager import StorageManager, safe_output_path
 from .services.email import EmailManager
+from .services.email_render import render_subject
 from .services.webhook import WebhookNotifier
 from .scrapers.github import GitHubScraper
 from .scrapers.hackernews import HackerNewsScraper
@@ -353,8 +354,19 @@ class HorizonOrchestrator:
                         f"{self.icons['email']} Sending {lang.upper()} email summary..."
                     )
                     subscribers = self.storage.load_subscribers()
-                    subject = f"Horizon Summary ({lang.upper()}) - {today}"
-                    self.email_manager.send_daily_summary(summary, subject, subscribers)
+                    subject = render_subject(
+                        self.config.email, lang=lang.upper(), date=today
+                    )
+                    self.email_manager.send_daily_summary(
+                        summary,
+                        subject,
+                        subscribers,
+                        items=important_items,
+                        summarizer=summarizer,
+                        date=today,
+                        language=lang,
+                        total_fetched=len(all_items),
+                    )
 
                 # Send webhook notification if configured
                 if self.webhook_notifier:

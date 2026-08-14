@@ -534,6 +534,14 @@ class EmailConfig(BaseModel):
     unsubscribe_keyword: str = "UNSUBSCRIBE"
     enabled: bool = False
 
+    # Rendering — templates live outside the package so they can be edited
+    # without reinstalling; missing files fall back to the built-in ones.
+    template_dir: str = "data/templates/email"
+    html_template: str = "summary.html.j2"
+    text_template: str = "summary.txt.j2"
+    subject_template: str = "Horizon Summary ({lang}) - {date}"
+    theme: Dict[str, str] = Field(default_factory=dict)
+
 
 class CategoryGroupConfig(BaseModel):
     """A quota group containing one or more source categories."""

@@ -1,0 +1,171 @@
+{#
+  Horizon Dawn — built-in HTML email template.
+
+  Copy this file into `data/templates/email/` to customize it; it is reloaded
+  on every run, so no reinstall is needed.
+
+  Mail-client constraints this template deliberately respects:
+    - all styling is inline (`style="…"`), never CSS variables or classes
+    - layout uses tables, the only reliable box model in Outlook desktop
+    - no <details>/<summary> (Gmail strips them) — references are a flat list
+    - no @media (prefers-color-scheme) — one palette, driven by `theme.*`
+
+  See docs/email-templates.md for the full context contract.
+#}
+{% set t = theme %}
+{% set tier_color = {'high': t.tier_high, 'good': t.tier_good, 'mid': t.tier_mid, 'low': t.tier_low} %}
+{# Unquoted font names on purpose: autoescaping would turn quotes into &#34;.
+   A space-separated identifier sequence is valid CSS for font-family. #}
+{% set font = 'Helvetica Neue, Helvetica, Arial, PingFang SC, Microsoft YaHei, sans-serif' %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="background-color:{{ t.bg }};margin:0;padding:0;">
+  <tr>
+    <td align="center" style="padding:0;">
+      <table role="presentation" width="800" cellpadding="0" cellspacing="0" border="0"
+             style="width:100%;max-width:800px;background-color:{{ t.bg }};">
+
+        {# ---------- Header ---------- #}
+        <tr>
+          <td bgcolor="{{ t.header_from }}" align="center"
+              style="background-color:{{ t.header_from }};background-image:linear-gradient(120deg, {{ t.header_from }}, {{ t.header_via }}, {{ t.header_to }});padding:32px 24px;">
+            <h1 style="margin:0;font-family:{{ font }};font-size:28px;font-weight:800;color:#ffffff;">
+              {{ labels.header }}
+            </h1>
+            {% if date %}
+            <div style="margin-top:6px;font-family:{{ font }};font-size:14px;color:#ffffff;opacity:0.85;">
+              {{ date }}
+            </div>
+            {% endif %}
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:24px;font-family:{{ font }};font-size:15px;line-height:1.6;color:{{ t.text }};">
+
+            {# ---------- Stats ---------- #}
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                   style="margin:0 0 20px 0;">
+              <tr>
+                <td style="border-left:4px solid {{ t.accent }};padding:4px 0 4px 12px;font-size:14px;color:{{ t.text_muted }};">
+                  {{ stats_line }}
+                </td>
+              </tr>
+            </table>
+
+            {% if groups %}
+            {# ---------- Table of contents ---------- #}
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                   style="background-color:{{ t.surface }};border:1px solid {{ t.border }};border-radius:4px;margin:0 0 28px 0;">
+              <tr>
+                <td style="padding:14px 18px;">
+                  {% for group in groups %}
+                  <div style="font-weight:700;color:{{ t.text }};{% if not loop.first %}margin-top:14px;{% endif %}">
+                    {{ group.name }}
+                  </div>
+                  <ol style="margin:6px 0 0 0;padding-left:22px;">
+                    {% for item in group.entries %}
+                    <li style="padding:3px 0;color:{{ t.text }};">
+                      {% if item.url %}
+                      <a href="{{ item.url }}" style="color:{{ t.link }};text-decoration:none;">{{ item.title }}</a>
+                      {% else %}
+                      {{ item.title }}
+                      {% endif %}
+                      <span style="display:inline-block;padding:1px 6px;margin-left:4px;border-radius:3px;font-family:monospace;font-size:11px;font-weight:700;color:#ffffff;background-color:{{ tier_color[item.score_tier] }};">{{ item.score }}</span>
+                    </li>
+                    {% endfor %}
+                  </ol>
+                  {% endfor %}
+                </td>
+              </tr>
+            </table>
+
+            {# ---------- Items ---------- #}
+            {% for group in groups %}
+            <h2 style="margin:28px 0 12px 0;font-family:{{ font }};font-size:22px;font-weight:800;color:{{ t.text }};">
+              {{ group.name }}
+            </h2>
+
+            {% for item in group.entries %}
+            <h3 style="margin:24px 0 8px 0;font-family:{{ font }};font-size:18px;font-weight:800;color:{{ t.text }};">
+              {% if item.url %}
+              <a href="{{ item.url }}" style="color:{{ t.link }};text-decoration:none;">{{ item.title }}</a>
+              {% else %}
+              {{ item.title }}
+              {% endif %}
+              <span style="display:inline-block;padding:2px 7px;margin-left:6px;border-radius:3px;font-family:monospace;font-size:12px;font-weight:700;color:#ffffff;background-color:{{ tier_color[item.score_tier] }};vertical-align:middle;">{{ item.score }}</span>
+            </h3>
+
+            {% if item.summary %}
+            <p style="margin:0 0 10px 0;color:{{ t.text }};">{{ item.summary }}</p>
+            {% endif %}
+            {% if item.primary_content %}
+            <p style="margin:0 0 10px 0;color:{{ t.text }};">{{ item.primary_content }}</p>
+            {% endif %}
+
+            <p style="margin:0 0 12px 0;padding-left:10px;border-left:2px solid {{ t.accent }};font-size:13px;color:{{ t.text_muted }};">
+              {{ item.source_line }}
+              {% if item.discussion_url %}
+              &middot; <a href="{{ item.discussion_url }}" style="color:{{ t.link }};">{{ labels.discussion }}</a>
+              {% endif %}
+            </p>
+
+            {% for block in item.blocks %}
+            <p style="margin:0 0 10px 0;color:{{ t.text }};">
+              <strong>「{{ block.title }}」</strong> {{ block.content }}
+            </p>
+            {% endfor %}
+
+            {% if item.sources %}
+            <div style="border:1px solid {{ t.border }};border-radius:4px;margin:12px 0;">
+              <div style="padding:6px 12px;font-size:13px;font-weight:600;color:{{ t.text_muted }};">
+                {{ labels.references }}
+              </div>
+              <ul style="margin:0;padding:0 12px 8px 30px;font-size:13px;">
+                {% for source in item.sources %}
+                <li style="padding:2px 0;">
+                  {% if source.url %}
+                  <a href="{{ source.url }}" style="color:{{ t.link }};">{{ source.title }}</a>
+                  {% else %}
+                  <span style="color:{{ t.text_muted }};">{{ source.title }}</span>
+                  {% endif %}
+                </li>
+                {% endfor %}
+              </ul>
+            </div>
+            {% endif %}
+
+            {% if item.tags %}
+            <p style="margin:0 0 12px 0;font-size:13px;color:{{ t.text_muted }};">
+              <strong style="color:{{ t.text }};">{{ labels.tags }}</strong>
+              {% for tag in item.tags %}
+              <span style="display:inline-block;padding:1px 7px;margin:0 3px 3px 0;border-radius:3px;font-size:12px;color:#ffffff;background-color:{{ t.accent }};">#{{ tag }}</span>
+              {% endfor %}
+            </p>
+            {% endif %}
+
+            <hr style="border:0;border-top:1px solid {{ t.border }};margin:20px 0;">
+            {% endfor %}
+            {% endfor %}
+
+            {% else %}
+            {# ---------- Degraded mode: no structured items were passed ----------
+               `summary_html` is already sanitized in Python (the Markdown source
+               is HTML-escaped before conversion), so it is inserted verbatim. #}
+            {{ summary_html | safe }}
+            {% endif %}
+
+          </td>
+        </tr>
+
+        {# ---------- Footer ---------- #}
+        <tr>
+          <td style="padding:20px 24px 32px 24px;border-top:1px solid {{ t.border }};text-align:center;font-family:{{ font }};font-size:12px;color:{{ t.text_muted }};">
+            <p style="margin:0 0 4px 0;">Sent by {{ sender_name }}</p>
+            <p style="margin:0;">To unsubscribe, please reply with "{{ unsubscribe_keyword }}"</p>
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>

@@ -24,8 +24,12 @@ def _escape_markdown(value: object) -> str:
     return _MARKDOWN_BLOCK_START.sub(r"\1\\\2", escaped)
 
 
-def _safe_url(value: object) -> Optional[str]:
-    """Return an HTML/Markdown-safe HTTP(S) URL, or None for unsafe URLs."""
+def safe_http_url(value: object) -> Optional[str]:
+    """Return a percent-encoded HTTP(S) URL, or None for unsafe URLs.
+
+    The result is *not* HTML-escaped, so it stays usable by renderers that
+    escape on their own (Jinja2 autoescape). Use `_safe_url` for Markdown.
+    """
     raw = str(value).strip()
     if not raw or any(ord(char) < 32 or ord(char) == 127 for char in raw):
         return None
@@ -36,8 +40,45 @@ def _safe_url(value: object) -> Optional[str]:
         parsed.port
     except (TypeError, ValueError):
         return None
-    encoded = quote(raw, safe=_URL_SAFE_CHARS)
+    return quote(raw, safe=_URL_SAFE_CHARS)
+
+
+def _safe_url(value: object) -> Optional[str]:
+    """Return an HTML/Markdown-safe HTTP(S) URL, or None for unsafe URLs."""
+    encoded = safe_http_url(value)
+    if encoded is None:
+        return None
     return html.escape(encoded, quote=True)
+
+
+def localize_text(text: str, language: str) -> str:
+    """Normalize a fragment for the target language (script + Pangu spacing)."""
+    if not text:
+        return ""
+    text = normalize_language(text, language)
+    return _pangu(text) if language == "zh" else text
+
+
+def source_parts(item: ContentItem, language: str) -> List[str]:
+    """Raw (unescaped) attribution parts for an item: type, feed/author, date."""
+    meta = item.metadata
+    parts = [item.source_type.value]
+    if meta.get("subreddit"):
+        parts.append(f"r/{meta['subreddit']}")
+    if meta.get("feed_name"):
+        parts.append(str(meta["feed_name"]))
+    else:
+        parts.append(item.author or "unknown")
+    if item.published_at:
+        if language == "zh":
+            parts.append(
+                f"{item.published_at.month}月{item.published_at.day}日 "
+                f"{item.published_at:%H:%M}"
+            )
+        else:
+            day = item.published_at.strftime("%d").lstrip("0")
+            parts.append(item.published_at.strftime(f"%b {day}, %H:%M"))
+    return parts
 
 
 def _pangu(text: str) -> str:
@@ -391,24 +432,10 @@ class DailySummarizer:
             primary_content = _pangu(primary_content)
 
         # Source line with parts joined by " · ", link appended at end
-        source_type = item.source_type.value
-        source_parts = [_escape_markdown(source_type)]
-        if meta.get("subreddit"):
-            source_parts.append(_escape_markdown(f"r/{meta['subreddit']}"))
-        if meta.get("feed_name"):
-            source_parts.append(_escape_markdown(meta["feed_name"]))
-        else:
-            source_parts.append(_escape_markdown(item.author or "unknown"))
-        if item.published_at:
-            if language == "zh":
-                source_parts.append(
-                    f"{item.published_at.month}月{item.published_at.day}日 "
-                    f"{item.published_at:%H:%M}"
-                )
-            else:
-                day = item.published_at.strftime("%d").lstrip("0")
-                source_parts.append(item.published_at.strftime(f"%b {day}, %H:%M"))
-        source_line = " \u00b7 ".join(source_parts)  # ·
+        escaped_parts = [
+            _escape_markdown(part) for part in source_parts(item, language)
+        ]
+        source_line = " \u00b7 ".join(escaped_parts)  # ·
 
         discussion_url = meta.get("discussion_url")
         if discussion_url:

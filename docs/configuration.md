@@ -691,6 +691,12 @@ Email delivery is optional and disabled unless `email.enabled` is `true`. Horizo
 - `password_env`: Environment variable containing the email password or app password. Defaults to `EMAIL_PASSWORD`.
 - `sender_name`: Display name shown in sent emails.
 - `subscribe_keyword` / `unsubscribe_keyword`: Keywords Horizon looks for in incoming email subjects.
+- `subject_template`: Subject line, with `{lang}` and `{date}` placeholders. Defaults to `Horizon Summary ({lang}) - {date}`.
+- `template_dir`: Directory holding your own email templates. Defaults to `data/templates/email`. Any template missing there falls back to the built-in one, so you can override a single file.
+- `html_template` / `text_template`: Template file names inside `template_dir`. Default to `summary.html.j2` and `summary.txt.j2`.
+- `theme`: Colour overrides for the built-in template, e.g. `{"accent": "#00897b"}`. Unlisted keys keep their default.
+
+Templates are plain files read at run time — editing them needs no reinstall and no rebuild of the Docker image (`data/` is the mounted volume). See [Email templates](email-templates.md) for the variables they receive and the mail-client constraints they must respect.
 
 Resend SMTP example:
 
@@ -813,7 +819,7 @@ When `delivery` is `summary_and_items`, item messages also include:
 | `#{item_url}` | Current item URL |
 | `#{item_score}` | Current item analysis score |
 
-For webhook delivery, Horizon flattens HTML disclosure blocks such as `<details><summary>...</summary>` in `#{summary}` into plain Markdown link lists. This makes the generated summary easier to render in chat products. Saved Markdown files, GitHub Pages, and email content are unchanged.
+For webhook delivery, Horizon flattens HTML disclosure blocks such as `<details><summary>...</summary>` in `#{summary}` into plain Markdown link lists. This makes the generated summary easier to render in chat products. Saved Markdown files and GitHub Pages are unchanged. Email applies the same flattening (mail clients drop `<details>`) and renders from its own templates — see [Email templates](email-templates.md).
 
 Use `#{key?limit=N&split=DELIM}` to truncate long values by splitting on `DELIM` and keeping segments until the total character count reaches `N`.
 

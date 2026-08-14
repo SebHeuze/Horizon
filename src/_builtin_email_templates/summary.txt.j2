@@ -1,0 +1,12 @@
+{#
+  Horizon — built-in plain-text email template (the text/plain MIME part).
+
+  Autoescaping is off here: this file must emit no HTML. Copy it into
+  `data/templates/email/` to customize it. Same context as summary.html.j2,
+  documented in docs/email-templates.md.
+#}
+{{ summary_markdown }}
+
+--
+Sent by {{ sender_name }}
+To unsubscribe, please reply with "{{ unsubscribe_keyword }}"

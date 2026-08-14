@@ -1,7 +1,6 @@
 """Email service for handling subscriptions and sending summaries."""
 
 import email
-import html
 import imaplib
 import logging
 import os
@@ -10,17 +9,15 @@ import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import parseaddr
-from typing import List
-
-try:
-    import markdown
-except ImportError:
-    markdown = None
+from typing import TYPE_CHECKING, List, Optional
 
 from rich.console import Console
 
-from ..ai.markdown_utils import clean_app_summary_markdown
-from ..models import EmailConfig
+from ..models import ContentItem, EmailConfig
+from .email_render import EmailRenderer, build_email_context
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from ..ai.summarizer import DailySummarizer
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +29,7 @@ class EmailManager:
         self.config = config
         self.pwd = os.getenv(self.config.password_env)
         self.console = console if console is not None else Console(stderr=True)
+        self.renderer = EmailRenderer(config)
 
         if not self.pwd and self.config.enabled:
             logger.warning(
@@ -159,42 +157,38 @@ class EmailManager:
             raise
         return server
 
-    def send_daily_summary(self, summary_md: str, subject: str, subscribers: List[str]):
-        """Sends the daily summary to all subscribers."""
+    def send_daily_summary(
+        self,
+        summary_md: str,
+        subject: str,
+        subscribers: List[str],
+        *,
+        items: Optional[List[ContentItem]] = None,
+        summarizer: Optional["DailySummarizer"] = None,
+        date: str = "",
+        language: str = "en",
+        total_fetched: Optional[int] = None,
+    ):
+        """Sends the daily summary to all subscribers.
+
+        `items` and `summarizer` unlock the rich per-item rendering; without
+        them the templates fall back to the Markdown-derived body.
+        """
         if not self.config.enabled or not subscribers:
             return
 
-        cleaned_summary = clean_app_summary_markdown(summary_md)
-        safe_summary = html.escape(cleaned_summary)
-        html_content = (
-            markdown.markdown(safe_summary)
-            if markdown
-            else f"<pre>{safe_summary}</pre>"
+        context = build_email_context(
+            self.config,
+            summary_md,
+            subject,
+            items=items,
+            summarizer=summarizer,
+            date=date,
+            language=language,
+            total_fetched=total_fetched,
         )
-
-        html_body = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <style>
-                body {{ font-family: sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }}
-                h1, h2, h3 {{ color: #2c3e50; }}
-                code {{ background-color: #f4f4f4; padding: 2px 5px; border-radius: 3px; font-family: monospace; }}
-                pre {{ background-color: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }}
-                blockquote {{ border-left: 4px solid #ddd; padding-left: 15px; color: #777; }}
-                .footer {{ margin-top: 40px; font-size: 12px; color: #888; text-align: center; border-top: 1px solid #eee; padding-top: 20px; }}
-            </style>
-        </head>
-        <body>
-            {html_content}
-            <div class="footer">
-                <p>Sent by {self.config.sender_name}</p>
-                <p>To unsubscribe, please reply with "{self.config.unsubscribe_keyword}"</p>
-            </div>
-        </body>
-        </html>
-        """
+        text_body = self.renderer.render_text(context)
+        html_body = self.renderer.render_html(context)
 
         try:
             with self._open_smtp() as server:
@@ -210,7 +204,7 @@ class EmailManager:
                     )
                     msg["To"] = subscriber
 
-                    text_part = MIMEText(cleaned_summary, "plain")
+                    text_part = MIMEText(text_body, "plain")
                     html_part = MIMEText(html_body, "html")
 
                     msg.attach(text_part)
