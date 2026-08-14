@@ -607,6 +607,34 @@ class DigestConfig(BaseModel):
         return value
 
 
+class DiscoveryConfig(BaseModel):
+    """Automatic discovery of candidate sources for the configured interests."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    topics: List[str] = Field(default_factory=list)
+    max_per_topic: int = Field(default=3, ge=1, le=20)
+    queries_per_topic: int = Field(default=3, ge=1, le=10)
+    search_results_per_query: int = Field(default=10, ge=1, le=50)
+    # Evaluating a candidate costs one AI call, so cap how many are tried per topic.
+    max_candidates_per_topic: int = Field(default=12, ge=1, le=100)
+    quality_threshold: float = Field(default=5.5, ge=0.0, le=10.0)
+    request_timeout_sec: float = Field(default=15.0, gt=0, le=120)
+    output_path: str = "docs/discovered-sources.md"
+    # Language used for the AI-written recommendation reasons; defaults to
+    # the first entry of ai.languages when left unset.
+    language: Optional[str] = None
+
+    @field_validator("topics")
+    @classmethod
+    def validate_topics(cls, topics: List[str]) -> List[str]:
+        cleaned = [topic.strip() for topic in topics]
+        if any(not topic for topic in cleaned):
+            raise ValueError("discovery.topics entries must be non-empty strings")
+        return cleaned
+
+
 class Config(BaseModel):
     """Main configuration model."""
 
@@ -621,3 +649,4 @@ class Config(BaseModel):
     extractors: Dict[str, ExtractorConfig] = Field(default_factory=dict)
     email: Optional[EmailConfig] = None
     webhook: Optional[WebhookConfig] = None
+    discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)

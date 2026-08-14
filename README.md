@@ -85,6 +85,7 @@ But Horizon is not just another summarizer. AI is great at reducing noise, but n
 - **📧 Deliver by Email** — Run a self-hosted SMTP/IMAP newsletter with automatic subscribe and unsubscribe handling
 - **🔔 Push to Chat or Automations** — Send templated results to Feishu/Lark, DingTalk, Slack, Discord, or custom webhook endpoints
 - **🧙 Start From Your Interests** — Use the setup wizard to generate a personalized source configuration
+- **🧭 Grow Your Source List** — Search the web for feeds matching your interests, score them, and report the ones you have not subscribed to yet
 - **⚙️ Tune the Radar** — Customize sources, processing profiles, models, languages, and delivery channels
 
 ## How It Works
@@ -390,6 +391,7 @@ Horizon is an open-source project maintained in spare time. If you'd like to sup
 | [Processing Profiles](docs/profiles.md) | Profile routing, prompts, runtime filtering preferences, enrichment blocks, and tools |
 | [Scoring](docs/scoring.md) | How Horizon evaluates and ranks news items |
 | [Scrapers](docs/scrapers.md) | Source scraper details and extension notes |
+| [Source Discovery](docs/discovery.md) | Finding and scoring new feeds for your interests with `horizon-discover` |
 | [Extractors](docs/extractors.md) | Full article extraction for RSS sources |
 | [MCP Tools](src/mcp/README.md) | Tool reference for MCP-compatible clients |
 

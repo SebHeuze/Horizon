@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from urllib.parse import urlsplit, urlunsplit
 from datetime import datetime, timezone
-from typing import Any, List, Optional, Union, cast
+from typing import Any, List, Optional, Sequence, Union, cast
 import httpx
 
 from ..ai.markdown_utils import clean_app_summary_markdown
@@ -850,3 +850,66 @@ class WebhookNotifier:
                 "summary": f"generation failed: {error_message}",
             }
         )
+
+    async def send_discovery_report(
+        self,
+        recommendations: Sequence[Any],
+        topics: List[str],
+        date: str,
+        report_path: str,
+        lang: str = "en",
+    ) -> None:
+        """Send a notification summarising a source discovery run.
+
+        Args:
+            recommendations: SourceRecommendation objects, best score first
+            topics: Topics that were searched
+            date: Date string (YYYY-MM-DD)
+            report_path: Path of the saved Markdown report
+            lang: Language code used for the AI-written reasons
+        """
+        self.console.print(
+            f"{self.icons['webhook']} Sending webhook discovery notification..."
+        )
+        await self.notify(
+            {
+                "date": date,
+                "language": lang,
+                "important_items": len(recommendations),
+                "all_items": len(recommendations),
+                "result": "success",
+                "timestamp": str(int(datetime.now(timezone.utc).timestamp())),
+                "message_title": f"Horizon source discovery - {date}",
+                "message_kind": "discovery",
+                "summary": _build_discovery_summary(
+                    recommendations, topics, date, report_path
+                ),
+            }
+        )
+
+
+def _build_discovery_summary(
+    recommendations: Sequence[Any],
+    topics: List[str],
+    date: str,
+    report_path: str,
+) -> str:
+    """Render the discovery run as the markdown body of a notification."""
+    header = (
+        f"# Source discovery - {date}\n\n"
+        f"> Topics: {', '.join(topics) or '-'}\n\n"
+    )
+    if not recommendations:
+        return header + "No new source cleared the quality threshold."
+
+    lines = [header, f"Found **{len(recommendations)}** new source(s).\n"]
+    for index, recommendation in enumerate(recommendations[:5], 1):
+        lines.append(
+            f"**{index}. {recommendation.name}** - {recommendation.quality_score:.1f}/10\n"
+            f"- {recommendation.reason}\n"
+            f"- `{recommendation.feed_url}`\n"
+        )
+    if len(recommendations) > 5:
+        lines.append(f"...and {len(recommendations) - 5} more.\n")
+    lines.append(f"\nFull report: {report_path}")
+    return "\n".join(lines)

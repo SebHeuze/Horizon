@@ -1,0 +1,54 @@
+name: Weekly Source Discovery
+
+# Disabled by default: rename to `weekly-discovery.yml` to enable it, and set
+# `discovery.enabled` to true in data/config.github.json. Each run spends AI
+# tokens (a few calls per topic).
+
+on:
+  schedule:
+    - cron: '0 5 * * 0'  # Sundays, 05:00 UTC
+  workflow_dispatch:      # Allow manual trigger
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Needed to commit the report
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.26"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Prepare GitHub Actions config
+        run: cp data/config.github.json data/config.json
+
+      - name: Discover sources
+        env:
+          # Same secrets as the daily run; keep in sync with data/config.github.json
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          HORIZON_WEBHOOK_URL: ${{ secrets.HORIZON_WEBHOOK_URL }}
+        run: uv run horizon-discover --output docs/discovered-sources.md
+
+      - name: Commit the report
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add docs/discovered-sources.md
+          git diff --staged --quiet || git commit -m "🔍 Weekly source discovery"
+          git push

@@ -9,7 +9,7 @@ Horizon is configured through a `.env` file for secrets, a JSON file for runtime
 
 ## Configuration Paths
 
-`horizon`, `horizon-wizard`, and `horizon-webhook` all resolve configuration and state paths the same way:
+`horizon`, `horizon-wizard`, `horizon-webhook`, and `horizon-discover` all resolve configuration and state paths the same way:
 
 | Option | Effect |
 | --- | --- |
@@ -22,9 +22,9 @@ uv run horizon --config /etc/horizon/config.json
 uv run horizon --data-dir /srv/horizon --config /etc/horizon/config.json
 ```
 
-When both options are present, configuration is loaded from `--config`, while summaries and subscribers remain under `--data-dir`. Because this logic is identical across all three CLIs, passing the same `-d`/`-c` flags to each one keeps them pointed at the same files — for example, generating a config with `horizon-wizard --data-dir /srv/horizon`, then running `horizon --data-dir /srv/horizon` and testing with `horizon-webhook --data-dir /srv/horizon`.
+When both options are present, configuration is loaded from `--config`, while summaries and subscribers remain under `--data-dir`. Because this logic is identical across all four CLIs, passing the same `-d`/`-c` flags to each one keeps them pointed at the same files — for example, generating a config with `horizon-wizard --data-dir /srv/horizon`, then running `horizon --data-dir /srv/horizon` and testing with `horizon-webhook --data-dir /srv/horizon`.
 
-Without either flag, all three default to `data/config.json`. To bootstrap a custom location without the wizard, initialize it manually:
+Without either flag, they all default to `data/config.json`. To bootstrap a custom location without the wizard, initialize it manually:
 
 ```bash
 mkdir -p /etc/horizon
@@ -718,6 +718,30 @@ Resend SMTP example:
 ```
 
 Set `RESEND_API_KEY` in `.env`. Recipients are loaded from `<data-dir>/subscribers.json` (`data/subscribers.json` by default).
+
+## Source Discovery
+
+`horizon-discover` searches the web for feeds matching your interests, scores them with the AI, and writes a Markdown report of the ones you are not subscribed to yet. It never edits your config: you copy the entries you want into `sources.rss`.
+
+```json
+"discovery": {
+  "enabled": false,
+  "topics": ["AI research", "developer tooling"],
+  "max_per_topic": 3,
+  "quality_threshold": 5.5,
+  "output_path": "docs/discovered-sources.md"
+}
+```
+
+With `enabled` left at `false`, the command exits immediately unless `--force` is passed. Topics come from `--topic` flags, then `discovery.topics`, then the `category` values of the configured RSS feeds. Everything already configured — feeds, subreddits, GitHub repos, Twitter users, Telegram channels, including disabled entries — is excluded before any scoring call is made.
+
+```bash
+uv run horizon-discover
+uv run horizon-discover -t "RISC-V" --max-per-topic 5
+```
+
+The full option list, cost model, and report format are documented in the [source discovery guide](discovery).
+
 
 ## Webhook Notification
 

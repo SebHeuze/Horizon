@@ -26,6 +26,7 @@ uv run horizon [--hours N] [-d DATA_DIR] [-c CONFIG] [-l LEVEL]   # main pipelin
 uv run horizon-wizard        # interactive config generator → data/config.json
 uv run horizon-mcp           # MCP stdio server
 uv run horizon-webhook       # webhook test/send CLI
+uv run horizon-discover      # search for new feeds matching discovery.topics
 uv run python scripts/check_mcp.py       # MCP smoke check (no network AI calls)
 ```
 
@@ -73,6 +74,15 @@ Output paths go through `safe_output_path()`; URLs through `src/url_security.py`
 ### MCP (`src/mcp/`)
 
 `server.py` (FastMCP tool/resource surface) → `service.py` (staged orchestration, run persistence) → `horizon_adapter.py` (loads the Horizon package from a resolved repo path and calls the *same* orchestrator methods). **The MCP layer must not reimplement pipeline logic.** Runs persist per-stage JSON under `data/mcp-runs/<run_id>/` so a run can resume from `raw`/`scored`/`filtered`/`enriched`. Stdout is reserved for the MCP protocol — all human output goes to stderr via the shared Rich console.
+
+### Source discovery (`src/discovery/`)
+
+`horizon-discover` is a side pipeline, not a stage of `orchestrator.run()`: AI-generated
+search queries → the shared `WebSearchTool` → feed resolution (`<link rel="alternate">`,
+then common paths) → one AI scoring call per candidate → `docs/discovered-sources.md`.
+`collect_existing_sources()` reads every configured source (disabled entries included) so
+known subscriptions are dropped **before** any scoring call. It never writes to the config;
+the report ends with a JSON snippet to paste into `sources.rss`. Contract: `docs/discovery.md`.
 
 ### Scrapers (`src/scrapers/`)
 

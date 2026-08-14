@@ -165,6 +165,13 @@
     "default_group": "other",
     "default_group_limit": null
   },
+  "discovery": {
+    "enabled": true,
+    "topics": ["ai-tools", "llm-inference", "semiconductors", "linux-kernel"],
+    "max_per_topic": 3,
+    "quality_threshold": 7.0,
+    "output_path": "docs/discovered-sources.md"
+  },
   "webhook": {
     "enabled": true,
     "url_env": "HORIZON_WEBHOOK_URL",

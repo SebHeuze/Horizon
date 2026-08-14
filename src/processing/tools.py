@@ -21,12 +21,25 @@ class ToolResult:
 class WebSearchTool:
     name = "web_search"
 
+    DEFAULT_MAX_RESULTS = 3
+    RESULT_LIMIT = 50
+
+    def _max_results(self, arguments: dict[str, Any]) -> int:
+        """Clamp a caller-provided result count into a sane range."""
+        try:
+            requested = int(arguments.get("max_results", self.DEFAULT_MAX_RESULTS))
+        except (TypeError, ValueError):
+            return self.DEFAULT_MAX_RESULTS
+        return max(1, min(requested, self.RESULT_LIMIT))
+
     async def execute(self, arguments: dict[str, Any]) -> list[dict[str, str]]:
         query = arguments.get("query")
         if not isinstance(query, str) or not query.strip():
             raise ValueError("web_search requires a non-empty query")
         try:
-            raw = await asyncio.to_thread(DDGS().text, query.strip(), max_results=3)
+            raw = await asyncio.to_thread(
+                DDGS().text, query.strip(), max_results=self._max_results(arguments)
+            )
         except Exception as exc:
             logger.warning("web_search failed for %r: %s", query, exc)
             return []

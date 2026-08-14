@@ -209,6 +209,18 @@
     "default_group": "other",
     "default_group_limit": null
   },
+  "discovery": {
+    "enabled": false,
+    "topics": ["AI research", "developer tooling"],
+    "max_per_topic": 3,
+    "queries_per_topic": 3,
+    "search_results_per_query": 10,
+    "max_candidates_per_topic": 12,
+    "quality_threshold": 5.5,
+    "request_timeout_sec": 15,
+    "output_path": "docs/discovered-sources.md",
+    "language": null
+  },
   "webhook": {
     "enabled": false,
     "url_env": "HORIZON_WEBHOOK_URL",
