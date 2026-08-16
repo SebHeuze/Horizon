@@ -542,6 +542,10 @@ class EmailConfig(BaseModel):
     subject_template: str = "Horizon Summary ({lang}) - {date}"
     theme: Dict[str, str] = Field(default_factory=dict)
 
+    # Directory where a .eml copy of every outgoing summary is written.
+    # None disables the dump.
+    dump_dir: Optional[str] = None
+
 
 class CategoryGroupConfig(BaseModel):
     """A quota group containing one or more source categories."""

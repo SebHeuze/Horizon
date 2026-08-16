@@ -4,16 +4,20 @@ import email
 import imaplib
 import logging
 import os
+import re
 import smtplib
 import ssl
+from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import parseaddr
+from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional
 
 from rich.console import Console
 
 from ..models import ContentItem, EmailConfig
+from ..storage.manager import safe_output_path
 from .email_render import EmailRenderer, build_email_context
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -157,6 +161,43 @@ class EmailManager:
             raise
         return server
 
+    def _dump_message(
+        self,
+        msg: MIMEMultipart,
+        subscriber: str,
+        *,
+        date: str = "",
+        language: str = "en",
+    ) -> Optional[Path]:
+        """Write the message to ``dump_dir`` as a ``.eml`` file.
+
+        The bytes are flattened the way :meth:`smtplib.SMTP.send_message`
+        flattens them, CRLF line endings included, so the file can be replayed
+        verbatim with ``sendmail()``. Returns ``None`` when no ``dump_dir`` is
+        configured; a dump failure is logged and never blocks the send.
+        """
+        if not self.config.dump_dir:
+            return None
+
+        try:
+            dump_dir = Path(self.config.dump_dir)
+            dump_dir.mkdir(parents=True, exist_ok=True)
+
+            safe_subscriber = re.sub(r"[^A-Za-z0-9._-]", "_", subscriber)
+            stamp = date or datetime.now().strftime("%Y-%m-%d")
+            path = safe_output_path(
+                dump_dir, f"horizon-{stamp}-{language}-{safe_subscriber}.eml"
+            )
+
+            raw = msg.as_bytes(policy=msg.policy.clone(linesep="\r\n"))
+            path.write_bytes(raw)
+
+            logger.info(f"Dumped outgoing email to {path} ({len(raw)} bytes)")
+            return path
+        except Exception as e:
+            logger.error(f"Failed to dump outgoing email for {subscriber}: {e}")
+            return None
+
     def send_daily_summary(
         self,
         summary_md: str,
@@ -209,6 +250,9 @@ class EmailManager:
 
                     msg.attach(text_part)
                     msg.attach(html_part)
+
+                    # Dump the raw message handed to SMTP.
+                    self._dump_message(msg, subscriber, date=date, language=language)
 
                     try:
                         server.send_message(msg)

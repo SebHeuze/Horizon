@@ -1,3 +1,6 @@
+import copy
+import io
+from email.generator import BytesGenerator
 from email.mime.multipart import MIMEMultipart
 
 import pytest
@@ -217,3 +220,70 @@ def test_check_subscriptions_skips_imap_when_disabled(monkeypatch):
     manager.check_subscriptions(storage_manager=object())
 
     assert FakeIMAP.instances == []
+
+
+def _smtplib_bytes(message):
+    """Flatten a message the way smtplib.SMTP.send_message does."""
+    msg_copy = copy.copy(message)
+    del msg_copy["Bcc"]
+    del msg_copy["Resent-Bcc"]
+    with io.BytesIO() as buffer:
+        BytesGenerator(buffer).flatten(msg_copy, linesep="\r\n")
+        return buffer.getvalue()
+
+
+def test_send_daily_summary_dumps_message_sent_to_smtp(monkeypatch, tmp_path):
+    monkeypatch.setenv("EMAIL_PASSWORD", "secret")
+    monkeypatch.setattr("src.services.email.smtplib.SMTP_SSL", FakeSMTP)
+    FakeSMTP.instances = []
+
+    dump_dir = tmp_path / "sent"
+    manager = EmailManager(_email_config(dump_dir=str(dump_dir)))
+
+    manager.send_daily_summary(
+        "# Hello", "Daily", ["user@example.com"], date="2026-08-16", language="fr"
+    )
+
+    dumped = dump_dir / "horizon-2026-08-16-fr-user_example.com.eml"
+    assert dumped.exists()
+    assert dumped.read_bytes() == _smtplib_bytes(FakeSMTP.instances[0].messages[0])
+
+
+def test_send_daily_summary_skips_dump_without_dump_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv("EMAIL_PASSWORD", "secret")
+    monkeypatch.setattr("src.services.email.smtplib.SMTP_SSL", FakeSMTP)
+    FakeSMTP.instances = []
+
+    manager = EmailManager(_email_config())
+    manager.send_daily_summary("# Hello", "Daily", ["user@example.com"])
+
+    assert list(tmp_path.iterdir()) == []
+    assert len(FakeSMTP.instances[0].messages) == 1
+
+
+def test_dump_message_keeps_hostile_subscriber_inside_dump_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv("EMAIL_PASSWORD", "secret")
+    dump_dir = tmp_path / "sent"
+    manager = EmailManager(_email_config(dump_dir=str(dump_dir)))
+
+    message = MIMEMultipart("alternative")
+    message["To"] = "../../etc/passwd@example.com"
+
+    path = manager._dump_message(message, "../../etc/passwd@example.com", date="2026-08-16")
+
+    assert path is not None
+    assert path.parent == dump_dir.resolve()
+
+
+def test_dump_failure_does_not_block_send(monkeypatch, tmp_path):
+    monkeypatch.setenv("EMAIL_PASSWORD", "secret")
+    monkeypatch.setattr("src.services.email.smtplib.SMTP_SSL", FakeSMTP)
+    FakeSMTP.instances = []
+
+    blocker = tmp_path / "sent"
+    blocker.write_text("not a directory")
+    manager = EmailManager(_email_config(dump_dir=str(blocker)))
+
+    manager.send_daily_summary("# Hello", "Daily", ["user@example.com"])
+
+    assert len(FakeSMTP.instances[0].messages) == 1
