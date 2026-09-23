@@ -18,7 +18,7 @@
       {
         "id": "background",
         "type": "section",
-        "tools": ["web_search"]
+        "tools": ["history_search", "web_search"]
       },
       {
         "id": "impact",
