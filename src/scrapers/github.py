@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 from datetime import datetime
 from typing import List, Optional
 import httpx
@@ -10,6 +11,35 @@ from .base import BaseScraper
 from ..models import ContentItem, SourceType, GitHubSourceConfig
 
 logger = logging.getLogger(__name__)
+
+# First "X.Y" or "X.Y.Z" in a tag: matches "v1.2.3", "n8n@2.39.9", "release-4.0".
+_VERSION_RE = re.compile(r"(\d+)\.(\d+)(?:\.(\d+))?")
+_LEVEL_RANK = {"major": 0, "minor": 1, "patch": 2}
+
+
+def release_level(tag: str) -> Optional[str]:
+    """Return the semver bump a tag represents, or None if it has no version.
+
+    ``X.0.0`` is a major release, ``X.Y.0`` a minor one, anything else a patch.
+    Under 1.0 a minor bump is the breaking one, so ``0.Y.0`` counts as major.
+    """
+    match = _VERSION_RE.search(tag)
+    if not match:
+        return None
+    major, minor, patch = (int(part or 0) for part in match.groups())
+    if patch:
+        return "patch"
+    if minor == 0 or major == 0:
+        return "major"
+    return "minor"
+
+
+def keeps_release(tag: str, min_level: Optional[str]) -> bool:
+    """Whether a release tag passes a ``release_level`` filter."""
+    if min_level is None or min_level == "patch":
+        return True
+    level = release_level(tag)
+    return level is not None and _LEVEL_RANK[level] <= _LEVEL_RANK[min_level]
 
 
 class GitHubScraper(BaseScraper):
@@ -200,6 +230,13 @@ class GitHubScraper(BaseScraper):
                 if published_at < since:
                     continue
 
+                if not keeps_release(release["tag_name"], source.release_level):
+                    logger.debug(
+                        "Skipping %s/%s %s below release_level=%s",
+                        owner, repo, release["tag_name"], source.release_level,
+                    )
+                    continue
+
                 item = ContentItem(
                     id=self._generate_id("github", "release", str(release["id"])),
                     source_type=SourceType.GITHUB,
@@ -221,4 +258,30 @@ class GitHubScraper(BaseScraper):
         except httpx.HTTPError as e:
             logger.warning("Error fetching releases for %s/%s: %s", owner, repo, e)
 
+        if source.collapse_releases and len(items) > 1:
+            items = [self._collapse_releases(items)]
+
         return items
+
+    @staticmethod
+    def _collapse_releases(items: List[ContentItem]) -> ContentItem:
+        """Fold several releases of one repository into the newest of them.
+
+        The item keeps the newest release's id, URL and date; its title lists
+        the other tags and its content chains every changelog, newest first,
+        so the analysis still sees what changed across the whole window.
+        """
+        ordered = sorted(items, key=lambda item: item.published_at, reverse=True)
+        newest = ordered[0]
+        tags = [item.metadata["tag"] for item in ordered]
+        content = "\n\n".join(
+            f"## {item.metadata['tag']}\n\n{item.content or ''}".rstrip()
+            for item in ordered
+        )
+        return newest.model_copy(
+            update={
+                "title": f"{newest.title} (also {', '.join(tags[1:])})",
+                "content": content,
+                "metadata": {**newest.metadata, "collapsed_tags": tags},
+            }
+        )

@@ -71,6 +71,18 @@ Two source types are supported:
 ```
 
 - `category` — optional tag for balanced digest grouping; set per source entry
+- `release_level` — `repo_releases` only. Smallest version bump kept: `"major"`
+  keeps `X.0.0` (and `0.Y.0`, the breaking bump before 1.0), `"minor"` also
+  keeps `X.Y.0`, `"patch"` or absent keeps everything. The version is the
+  first `X.Y[.Z]` found in the tag, so `v1.2.3` and `n8n@2.39.9` both parse;
+  tags without one (`stable`, `nightly`) are dropped once a level is set.
+- `collapse_releases` — `repo_releases` only. Folds every release of the window
+  into a single item: the newest release's URL and date, a title listing the
+  other tags, and all changelogs chained newest first. One digest slot per
+  repository, however often it ships.
+
+For a project that releases several times a day (Renovate, n8n), combine
+both: `"release_level": "minor", "collapse_releases": true`.
 
 **Authentication**: Set `GITHUB_TOKEN` in your environment for higher rate limits (5000 req/hr vs 60 without).
 
