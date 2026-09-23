@@ -17,7 +17,7 @@ from src.models import (
     SourceType,
 )
 from src.processing import ProfileRegistry
-from src.processing.tools import ToolResult
+from src.processing.tools import ToolRegistry, ToolResult
 
 
 PROFILES = ProfileRegistry.load(
@@ -49,9 +49,9 @@ def make_item() -> ContentItem:
 
 
 class FakeTools:
-    names = {"web_search"}
+    names = {"web_search", "history_search"}
 
-    async def execute(self, request_id, block_id, tool, arguments):
+    async def execute(self, request_id, block_id, tool, arguments, current_item=None):
         assert block_id == "background"
         assert tool == "web_search"
         assert arguments == {"query": "project architecture"}
@@ -526,3 +526,57 @@ def test_enrichment_batch_reports_failure_without_discarding_successes():
     assert result.succeeded_ids == [successful_item.id]
     assert result.failed_ids == [failed_item.id]
     assert result.failures[failed_item.id] == "RuntimeError: AI unavailable"
+
+
+def test_history_search_reuses_one_call_for_both_languages(tmp_path, monkeypatch):
+    (tmp_path / "horizon-2026-04-01-en.md").write_text(
+        "### [Atlas preview](https://example.com/preview) ⭐️ 8/10\n\n"
+        "Atlas preview requires manual batch configuration.\n\n---\n",
+        encoding="utf-8",
+    )
+    tools = ToolRegistry(tmp_path)
+    tool_calls = []
+    execute = tools.execute
+
+    async def record_execute(**kwargs):
+        tool_calls.append(kwargs)
+        return await execute(**kwargs)
+
+    monkeypatch.setattr(tools, "execute", record_execute)
+    requests = []
+
+    async def complete(**kwargs):
+        requests.append(kwargs)
+        if kwargs["system"].startswith("# Tool planning"):
+            return json.dumps({"tool_requests": [
+                {"block_id": "background", "tool": "history_search",
+                 "arguments": {"query": query}, "purpose": "Find the earlier version"}
+                for query in ("Atlas preview", "Atlas batch")
+            ]})
+        if "Generate only block `background`" in kwargs["system"]:
+            assert "Atlas preview requires manual batch configuration." in kwargs["user"]
+            return json.dumps({"block": {
+                "id": "background", "title": "Earlier coverage",
+                "content": "The April 1 digest covered the preview's manual batch configuration.",
+                "source_refs": ["tool-1-1"],
+            }})
+        assert "manual batch configuration" not in kwargs["user"]
+        return json.dumps({"title": "Atlas release", "blocks": [{
+            "id": "summary", "title": "Summary", "content": "Atlas now automates batching.",
+        }]})
+
+    item = make_item()
+    item.published_at = datetime(2026, 4, 2, tzinfo=timezone.utc)
+    enricher = ContentEnricher(SimpleNamespace(complete=complete), PROFILES, ["en", "zh"], tools=tools)
+
+    asyncio.run(enricher._enrich_item(item))
+
+    assert len(tool_calls) == 1
+    assert tool_calls[0]["current_item"] is item
+    # One existing planning call, then base and background generation per language.
+    assert len(requests) == 5
+    for language in ("en", "zh"):
+        artifact = item.processing.artifacts[language]
+        assert artifact.sources[0].url == "https://example.com/preview"
+        assert artifact.sources[0].title.startswith("2026-04-01")
+        assert artifact.blocks[-1].source_refs == ["tool-1-1"]

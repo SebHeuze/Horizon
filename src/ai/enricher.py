@@ -287,6 +287,7 @@ class ContentEnricher:
 
         results = []
         seen = set()
+        history_requested = False
         for request in plan.tool_requests[:MAX_TOOL_REQUESTS]:
             if request.block_id not in allowed:
                 raise ValueError(f"Tool request targets unknown block: {request.block_id}")
@@ -294,6 +295,10 @@ class ContentEnricher:
                 raise ValueError(
                     f"Tool {request.tool} is not allowed for block {request.block_id}"
                 )
+            if request.tool == "history_search":
+                if history_requested:
+                    continue
+                history_requested = True
             key = (request.block_id, request.tool, json.dumps(request.arguments, sort_keys=True))
             if key in seen:
                 continue
@@ -304,6 +309,7 @@ class ContentEnricher:
                     block_id=request.block_id,
                     tool=request.tool,
                     arguments=request.arguments,
+                    current_item=item,
                 )
             )
         return results

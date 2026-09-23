@@ -35,6 +35,9 @@ def test_tool_planning_excludes_profile_writing_policy():
     assert profile.enrichment_prompt in block
     assert all(configured.id in planning for configured in blocks)
     assert "Block `background` is required" in planning
+    assert "history_search" in planning
+    assert "at most 3 short results" in planning
+    assert "Request at most one history search per item" in planning
 
 
 def test_enrichment_context_uses_profile_content_budget():

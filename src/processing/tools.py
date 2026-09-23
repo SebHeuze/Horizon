@@ -2,10 +2,15 @@
 
 import asyncio
 from dataclasses import dataclass
+from datetime import timezone
 import logging
+from pathlib import Path
 from typing import Any
 
 from ddgs import DDGS
+
+from ..models import ContentItem
+from .history import HistorySearchTool
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +62,11 @@ class WebSearchTool:
 class ToolRegistry:
     """Small allowlisted registry for executable profile tools."""
 
-    def __init__(self):
-        self._tools = {WebSearchTool.name: WebSearchTool()}
+    def __init__(self, summaries_dir: Path | None = None):
+        self._tools = {
+            WebSearchTool.name: WebSearchTool(),
+            HistorySearchTool.name: HistorySearchTool(summaries_dir),
+        }
 
     @property
     def names(self) -> set[str]:
@@ -70,14 +78,23 @@ class ToolRegistry:
         block_id: str,
         tool: str,
         arguments: dict[str, Any],
+        current_item: ContentItem | None = None,
     ) -> ToolResult:
         try:
             implementation = self._tools[tool]
         except KeyError as exc:
             raise ValueError(f"Unknown enrichment tool: {tool}") from exc
+        if isinstance(implementation, HistorySearchTool) and current_item is not None:
+            results = await implementation.execute(
+                arguments,
+                before=current_item.published_at.astimezone(timezone.utc).date(),
+                exclude_url=str(current_item.url),
+            )
+        else:
+            results = await implementation.execute(arguments)
         return ToolResult(
             request_id=request_id,
             block_id=block_id,
             tool=tool,
-            results=await implementation.execute(arguments),
+            results=results,
         )
