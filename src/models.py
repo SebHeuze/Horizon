@@ -223,6 +223,14 @@ class GitHubSourceConfig(BaseModel):
     enabled: bool = True
     category: Optional[str] = None
     profile: ProfileRoute = None
+    # repo_releases only. Smallest semver bump kept: "major" keeps X.0.0 (and
+    # 0.Y.0), "minor" also keeps X.Y.0, "patch" or None keeps everything.
+    # Tags without a version number ("stable", "nightly") are dropped as soon
+    # as a level is set.
+    release_level: Optional[Literal["major", "minor", "patch"]] = None
+    # repo_releases only. Fold every release of the window into one item, so a
+    # repository shipping several times a day takes a single digest slot.
+    collapse_releases: bool = False
 
 
 class HackerNewsConfig(BaseModel):
