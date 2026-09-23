@@ -30,6 +30,7 @@ from .scrapers.gdelt import GDELTScraper
 from .scrapers.google_news import GoogleNewsScraper
 from .ai.client import create_ai_client
 from .ai.analyzer import ContentAnalyzer
+from .ai.decisions import create_decision_client
 from .ai.summarizer import DailySummarizer
 from .ai.enricher import ContentEnricher, EnrichmentBatchResult
 from .ai.tokens import get_usage_snapshot
@@ -1032,9 +1033,7 @@ class HorizonOrchestrator:
         self.console.print(
             f"   Re-analyzing {len(expanded)} Twitter items with reply context...\n"
         )
-        ai_client = create_ai_client(self.config.ai)
-        analyzer = ContentAnalyzer(ai_client, self.profiles, console=self.console)
-        await analyzer.analyze_batch(expanded)
+        await self._create_analyzer().analyze_batch(expanded)
 
     async def enrich_items(self, items: List[ContentItem]) -> EnrichmentBatchResult:
         """Enrich items with background knowledge (2nd AI pass).
@@ -1082,10 +1081,34 @@ class HorizonOrchestrator:
         """
         self.console.print(f"{self.icons['ai']} Analyzing content with AI...")
 
-        ai_client = create_ai_client(self.config.ai)
-        analyzer = ContentAnalyzer(ai_client, self.profiles, console=self.console)
+        return await self._create_analyzer().analyze_batch(items)
 
-        return await analyzer.analyze_batch(items)
+    def _create_analyzer(self) -> ContentAnalyzer:
+        """Build the analyzer, with the decision model when one is configured."""
+        decision_client = create_decision_client(self.config.ai.decision)
+        if decision_client is not None:
+            steps = [
+                name
+                for name, enabled in (
+                    ("classification", decision_client.config.classification),
+                    ("prefilter", decision_client.config.prefilter),
+                )
+                if enabled
+            ]
+            self.console.print(
+                f"   [dim]Decision model {decision_client.config.model}: "
+                f"{', '.join(steps)}[/dim]"
+            )
+        return ContentAnalyzer(
+            create_ai_client(self.config.ai),
+            self.profiles,
+            console=self.console,
+            decision_client=decision_client,
+            profile_thresholds={
+                profile_id: settings.threshold
+                for profile_id, settings in self.config.processing.profile_settings.items()
+            },
+        )
 
     async def _generate_summary(
         self,

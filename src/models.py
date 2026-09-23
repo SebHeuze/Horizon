@@ -184,6 +184,31 @@ AI_PROVIDER_DEFAULTS = {
 }
 
 
+class DecisionConfig(BaseModel):
+    """Optional decision model (TypeSafe Jev via OpenRouter's Decisions API).
+
+    A decision model returns typed answers with probabilities instead of text:
+    it is cheaper and faster than the main model for narrow questions, but it
+    cannot write summaries. It therefore only takes over the decision steps
+    it is enabled for, and every failure falls back to the main model.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = "~typesafe/jev-latest"
+    base_url: str = "https://openrouter.ai/api/alpha/decisions"
+    api_key_env: str = "OPENROUTER_API_KEY"
+    timeout_sec: float = Field(default=30.0, gt=0)
+    # Route items with a profile candidate list (or "auto") to a profile.
+    classification: bool = True
+    # Score every item first; only items scoring at least
+    # `threshold - prefilter_margin` go through the main model's analysis,
+    # whose score stays authoritative. The others keep the decision score and
+    # never reach the digest, so they need no summary.
+    prefilter: bool = False
+    prefilter_margin: float = Field(default=1.0, ge=0, le=10)
+
+
 class AIConfig(BaseModel):
     """AI client configuration."""
 
@@ -201,6 +226,7 @@ class AIConfig(BaseModel):
     # Azure OpenAI specific; required when provider == AZURE
     azure_endpoint_env: Optional[str] = None
     api_version: Optional[str] = None
+    decision: Optional[DecisionConfig] = None
 
     @field_validator("languages")
     @classmethod

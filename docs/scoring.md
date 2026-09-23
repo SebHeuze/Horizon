@@ -14,20 +14,24 @@ in the runtime configuration.
 
 1. **Profile resolution** — An explicit source profile is used directly. A
    missing profile or `"auto"` is matched by AI using all loaded `match.md`
-   prompts; a candidate array limits that choice to the listed profiles.
+   prompts; a candidate array limits that choice to the listed profiles. When
+   `ai.decision` is configured, this choice is asked to the decision model first.
 2. **Content preparation** — The profile's `content.analysis_max_chars` and
    `content.sampling` control how much article text reaches the model. Sampling
    keeps either the opening or excerpts from the beginning, middle, and end.
    Available comments and engagement metadata are added separately.
-3. **Profile analysis** — The selected profile's `analysis.md` prompt evaluates
+3. **Decision prefilter** (optional, `ai.decision.prefilter`) — The decision
+   model scores the item against the same `analysis.md`; an item clearly below
+   its profile threshold keeps that score and skips the next step.
+4. **Profile analysis** — The selected profile's `analysis.md` prompt evaluates
    the item and returns a score, reason, one-sentence summary, and tags.
-4. **Validation and retry** — Responses are parsed as JSON. Failed AI calls are
+5. **Validation and retry** — Responses are parsed as JSON. Failed AI calls are
    retried with exponential backoff. An invalid analysis response gets one repair
    attempt; if it still fails validation, the analysis is stored with a null score.
-5. **Profile filtering** — If a runtime threshold is configured for the resolved
+6. **Profile filtering** — If a runtime threshold is configured for the resolved
    profile, only items meeting it continue. Without a threshold, analyzed items
    continue without score filtering.
-6. **Digest selection** — Topic deduplication runs within each profile. Optional
+7. **Digest selection** — Topic deduplication runs within each profile. Optional
    category quotas and a final item cap select the items to enrich.
 
 Analysis and enrichment concurrency are configured through

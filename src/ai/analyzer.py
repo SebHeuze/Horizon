@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import List, Optional
+from typing import List, Mapping, Optional
 from pydantic import ValidationError
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, MofNCompleteColumn
@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 from .client import AIClient
 from .classifier import ContentClassifier
+from .decisions import DecisionClient
+from .prompting.decisions import SCORE_QUESTION, item_state, score_question
 from .prompting.analysis import analysis_system_prompt, analysis_user_prompt
 from .utils import parse_json_response
 from ..models import ContentAnalysis, ContentItem
@@ -28,10 +30,21 @@ class ContentAnalyzer:
         ai_client: AIClient,
         profiles: ProfileRegistry,
         console: Optional[Console] = None,
+        decision_client: Optional[DecisionClient] = None,
+        profile_thresholds: Optional[Mapping[str, Optional[float]]] = None,
     ):
         self.client = ai_client
         self.profiles = profiles
-        self.classifier = ContentClassifier(ai_client, profiles)
+        self.decision_client = decision_client
+        self.profile_thresholds = dict(profile_thresholds or {})
+        classification_client = (
+            decision_client
+            if decision_client is not None and decision_client.config.classification
+            else None
+        )
+        self.classifier = ContentClassifier(
+            ai_client, profiles, decision_client=classification_client
+        )
         self.console = console or Console(stderr=True)
 
     @staticmethod
@@ -148,6 +161,9 @@ class ContentAnalyzer:
 
         discussion_section = "\n".join(discussion_parts) if discussion_parts else ""
 
+        if await self._prefilter(item, profile, selected_content, discussion_section):
+            return
+
         # Generate user prompt
         user_prompt = analysis_user_prompt(item, content_section, discussion_section)
 
@@ -186,6 +202,61 @@ class ContentAnalyzer:
 
         if item.processing:
             item.processing.analysis = result
+
+    def _prefilter_cutoff(self, profile_id: str) -> Optional[float]:
+        """Decision score under which the main model is not consulted, if any."""
+        if self.decision_client is None or not self.decision_client.config.prefilter:
+            return None
+        threshold = self.profile_thresholds.get(profile_id)
+        if threshold is None:
+            return None
+        return threshold - self.decision_client.config.prefilter_margin
+
+    async def _prefilter(
+        self,
+        item: ContentItem,
+        profile,
+        content: str,
+        discussion: str,
+    ) -> bool:
+        """Score with the decision model; True when the item is settled as rejected.
+
+        The decision score is final only for items clearly below the profile
+        threshold: they never reach the digest, so the summary and tags the
+        main model would write are not needed. Any failure lets the main model
+        analyze the item as usual.
+        """
+        cutoff = self._prefilter_cutoff(profile.id)
+        if cutoff is None:
+            return False
+        try:
+            answers = await self.decision_client.decide(
+                item_state(item, content, discussion),
+                {SCORE_QUESTION: score_question(profile)},
+            )
+            score = answers[SCORE_QUESTION].score
+        except Exception as exc:
+            logger.warning(
+                "Decision model could not score %s, using the main model: %s",
+                item.id,
+                exc,
+            )
+            return False
+        if score is None:
+            return False
+        score = min(max(score, 0.0), 10.0)
+        if score >= cutoff:
+            return False
+        if item.processing:
+            item.processing.analysis = ContentAnalysis(
+                score=round(score, 2),
+                reason=(
+                    f"Rejected by the decision model "
+                    f"({self.decision_client.config.model}) before full analysis"
+                ),
+                summary=item.title,
+            )
+        return True
 
     @classmethod
     def _validate_analysis_response(

@@ -308,6 +308,50 @@ By default, AI scoring and enrichment run one item at a time. If your API endpoi
 - Result ordering is preserved regardless of concurrency.
 - If you also use `throttle_sec`, each concurrent task sleeps independently after finishing an item.
 
+### Decision Model
+
+A *decision model* such as TypeSafe's Jev (on OpenRouter) answers narrow typed
+questions with probabilities instead of text. It is much cheaper and faster
+than a chat model, but it cannot write summaries, tags, or enrichment. Horizon
+can hand it the two decision steps of the pipeline while the main `ai` model
+keeps everything that produces text:
+
+```json
+{
+  "ai": {
+    "provider": "openai",
+    "model": "<your-main-model>",
+    "base_url": "https://openrouter.ai/api/v1",
+    "api_key_env": "OPENROUTER_API_KEY",
+    "decision": {
+      "model": "~typesafe/jev-latest",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "classification": true,
+      "prefilter": true,
+      "prefilter_margin": 1.0
+    }
+  }
+}
+```
+
+- `classification` (default `true`): items whose source `profile` is `"auto"` or
+  a candidate list are routed by a `choice` question whose options are the
+  candidates' `match.md`. Items with an explicit profile never ask anything.
+- `prefilter` (default `false`): every item is first scored by a `score`
+  question built from the profile's `analysis.md` on a 0–10 ladder. An item
+  scoring below `threshold - prefilter_margin` for its profile is rejected with
+  that score and never reaches the main model; the others get the usual full
+  analysis, whose score stays authoritative. Profiles without a `threshold` in
+  `processing.profile_settings` are never prefiltered.
+- `model`, `base_url` (default `https://openrouter.ai/api/alpha/decisions`),
+  `api_key_env` (default `OPENROUTER_API_KEY`), `timeout_sec` (default `30`).
+- Every decision failure (HTTP error, unexpected answer, missing key) falls back
+  to the main model for that item, with a warning; a missing key disables the
+  decision model for the run.
+- A prefiltered item keeps its title as summary and has no tags. Lowering the
+  threshold afterwards (for example through an MCP `threshold` argument) can let
+  such items through with that minimal analysis.
+
 **Custom Base URL** (for proxies):
 
 ```json

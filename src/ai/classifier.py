@@ -5,9 +5,15 @@ import logging
 from pydantic import BaseModel, Field, ValidationError
 
 from .client import AIClient
+from .decisions import DecisionClient
 from .prompting.classification import (
     classification_system_prompt,
     classification_user_prompt,
+)
+from .prompting.decisions import (
+    CLASSIFICATION_QUESTION,
+    classification_question,
+    item_state,
 )
 from .utils import parse_json_response
 from ..models import ClassificationResult, ContentItem, ProcessingResult
@@ -25,9 +31,15 @@ class ClassificationResponse(BaseModel):
 class ContentClassifier:
     """Choose a profile from explicit source configuration or AI matching."""
 
-    def __init__(self, client: AIClient, profiles: ProfileRegistry):
+    def __init__(
+        self,
+        client: AIClient,
+        profiles: ProfileRegistry,
+        decision_client: DecisionClient | None = None,
+    ):
         self.client = client
         self.profiles = profiles
+        self.decision_client = decision_client
 
     async def resolve(self, item: ContentItem) -> LoadedProfile:
         requested = item.profile or "auto"
@@ -116,6 +128,15 @@ class ContentClassifier:
         item: ContentItem,
         candidate_ids: tuple[str, ...] | None = None,
     ) -> ClassificationResponse:
+        if self.decision_client is not None:
+            try:
+                return await self._classify_with_decision_model(item, candidate_ids)
+            except Exception as exc:
+                logger.warning(
+                    "Decision model could not classify %s, using the main model: %s",
+                    item.id,
+                    exc,
+                )
         response = await self.client.complete(
             system=classification_system_prompt(),
             user=classification_user_prompt(item, self.profiles, candidate_ids),
@@ -133,3 +154,37 @@ class ContentClassifier:
                 f"classifier selected profile outside the allowed catalog: {result.profile}"
             )
         return result
+
+    async def _classify_with_decision_model(
+        self,
+        item: ContentItem,
+        candidate_ids: tuple[str, ...] | None,
+    ) -> ClassificationResponse:
+        profiles = (
+            self.profiles.profiles
+            if candidate_ids is None
+            else tuple(self.profiles.get(profile_id) for profile_id in candidate_ids)
+        )
+        if len(profiles) == 1:
+            return ClassificationResponse(
+                profile=profiles[0].id,
+                confidence=1,
+                reason="Single candidate profile",
+            )
+        answers = await self.decision_client.decide(
+            item_state(item, (item.content or "").strip()[:2000]),
+            {CLASSIFICATION_QUESTION: classification_question(profiles)},
+        )
+        answer = answers[CLASSIFICATION_QUESTION]
+        allowed_ids = {profile.id for profile in profiles}
+        if answer.choice not in allowed_ids:
+            raise ValueError(
+                f"decision model selected profile outside the allowed catalog: {answer.choice}"
+            )
+        confidence = answer.probabilities.get(answer.choice, answer.confidence)
+        confidence = 0.0 if confidence is None else min(max(confidence, 0.0), 1.0)
+        return ClassificationResponse(
+            profile=answer.choice,
+            confidence=confidence,
+            reason=f"Decision model ({self.decision_client.config.model})",
+        )
