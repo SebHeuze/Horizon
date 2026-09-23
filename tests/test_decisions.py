@@ -15,7 +15,7 @@ from src.ai.decisions import (
     DecisionError,
     create_decision_client,
 )
-from src.ai.prompting.decisions import SCORE_LEVELS
+from src.ai.prompting.decisions import MAX_SCORE_LEVELS, SCORE_LEVELS, level_to_score
 from src.models import AIConfig, ContentItem, DecisionConfig, SourceType
 from src.processing import ProfileRegistry
 
@@ -215,11 +215,21 @@ def test_prefilter_rejects_clear_misses_without_main_model():
     item, calls = _analyze(decision, {"tech-news": 6.0})
 
     assert calls == []
-    assert item.processing.analysis.score == 2.4
+    assert item.processing.analysis.score == 3.4
     assert item.processing.analysis.summary == item.title
     _, questions = decision.calls[0]
     assert questions["importance"]["criteria"] == SCORE_LEVELS
     assert "Scoring rubric" in questions["importance"]["instructions"]
+
+
+def test_score_ladder_fits_the_api_level_cap():
+    # The API answers HTTP 400 "Too many score levels" above 10.
+    assert len(SCORE_LEVELS) <= MAX_SCORE_LEVELS
+    assert level_to_score(0) == 1
+    assert level_to_score(len(SCORE_LEVELS) - 1) == 10
+    assert level_to_score(4.5) == 5.5
+    assert level_to_score(-1) == 1
+    assert level_to_score(42) == 10
 
 
 def test_prefilter_margin_keeps_borderline_items_for_main_model():

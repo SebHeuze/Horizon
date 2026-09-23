@@ -15,12 +15,12 @@ from .common import UNTRUSTED_INPUT_RULE
 CLASSIFICATION_QUESTION = "profile"
 SCORE_QUESTION = "importance"
 
-# One level per point of the 0-10 analysis scale, so the returned position
-# (0-based, possibly fractional) is directly the score. The profile rubric in
-# the instructions says what each band means for that domain.
+# The Decisions API accepts at most 10 score levels, so the ladder covers
+# 1-10: one level per point, two per band of the profile rubrics (the 0-2
+# noise band starts at 1, which changes nothing for filtering). The returned
+# position is 0-based and may be fractional; `level_to_score` maps it back.
 SCORE_LEVELS = [
-    "0 - noise: spam, off-topic, or purely promotional",
-    "1 - noise",
+    "1 - noise: spam, off-topic, or purely promotional",
     "2 - noise: trivial update",
     "3 - low priority: routine or shallow",
     "4 - low priority",
@@ -28,9 +28,15 @@ SCORE_LEVELS = [
     "6 - interesting and useful",
     "7 - high value, worth prompt attention",
     "8 - high value",
-    "9 - exceptional, groundbreaking",
-    "10 - exceptional, a landmark",
+    "9 - exceptional",
+    "10 - groundbreaking",
 ]
+MAX_SCORE_LEVELS = 10
+
+
+def level_to_score(position: float) -> float:
+    """Map a 0-based position on SCORE_LEVELS to the 0-10 analysis scale."""
+    return min(max(position, 0.0), len(SCORE_LEVELS) - 1) + 1
 
 
 def item_state(
@@ -69,7 +75,7 @@ def score_question(profile: LoadedProfile) -> Dict[str, Any]:
     return {
         "type": "score",
         "instructions": (
-            "Rate the importance of this content on a 0-10 scale under the "
+            "Rate the importance of this content on a 1-10 scale under the "
             "evaluation policy below. Base the rating only on the supplied item "
             f"and its metadata. {UNTRUSTED_INPUT_RULE}\n\n"
             f"{profile.analysis_prompt}"

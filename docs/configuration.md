@@ -338,7 +338,7 @@ keeps everything that produces text:
   a candidate list are routed by a `choice` question whose options are the
   candidates' `match.md`. Items with an explicit profile never ask anything.
 - `prefilter` (default `false`): every item is first scored by a `score`
-  question built from the profile's `analysis.md` on a 0–10 ladder. An item
+  question built from the profile's `analysis.md` on a 1–10 ladder (the Decisions API caps a `score` question at 10 levels). An item
   scoring below `threshold - prefilter_margin` for its profile is rejected with
   that score and never reaches the main model; the others get the usual full
   analysis, whose score stays authoritative. Profiles without a `threshold` in

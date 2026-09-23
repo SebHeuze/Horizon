@@ -13,7 +13,12 @@ logger = logging.getLogger(__name__)
 from .client import AIClient
 from .classifier import ContentClassifier
 from .decisions import DecisionClient
-from .prompting.decisions import SCORE_QUESTION, item_state, score_question
+from .prompting.decisions import (
+    SCORE_QUESTION,
+    item_state,
+    level_to_score,
+    score_question,
+)
 from .prompting.analysis import analysis_system_prompt, analysis_user_prompt
 from .utils import parse_json_response
 from ..models import ContentAnalysis, ContentItem
@@ -244,7 +249,7 @@ class ContentAnalyzer:
             return False
         if score is None:
             return False
-        score = min(max(score, 0.0), 10.0)
+        score = level_to_score(score)
         if score >= cutoff:
             return False
         if item.processing:
