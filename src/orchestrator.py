@@ -29,7 +29,7 @@ from .scrapers.ossinsight import OSSInsightScraper
 from .scrapers.gdelt import GDELTScraper
 from .scrapers.google_news import GoogleNewsScraper
 from .ai.client import create_ai_client
-from .ai.analyzer import ContentAnalyzer
+from .ai.analyzer import ContentAnalyzer, compare_decision_scores
 from .ai.decisions import create_decision_client
 from .ai.summarizer import DailySummarizer
 from .ai.enricher import ContentEnricher, EnrichmentBatchResult
@@ -1096,7 +1096,9 @@ class HorizonOrchestrator:
         self.console.print(f"{self.icons['ai']} Analyzing content with AI...")
 
         with usage_stage("analysis"):
-            return await self._create_analyzer().analyze_batch(items)
+            analyzed = await self._create_analyzer().analyze_batch(items)
+        self._print_decision_comparison(analyzed)
+        return analyzed
 
     def _create_analyzer(self) -> ContentAnalyzer:
         """Build the analyzer, with the decision model when one is configured."""
@@ -1107,6 +1109,7 @@ class HorizonOrchestrator:
                 for name, enabled in (
                     ("classification", decision_client.config.classification),
                     ("prefilter", decision_client.config.prefilter),
+                    ("final scoring", decision_client.config.final_scoring),
                 )
                 if enabled
             ]
@@ -1119,11 +1122,43 @@ class HorizonOrchestrator:
             self.profiles,
             console=self.console,
             decision_client=decision_client,
-            profile_thresholds={
-                profile_id: settings.threshold
-                for profile_id, settings in self.config.processing.profile_settings.items()
-            },
+            profile_thresholds=self._profile_thresholds(),
         )
+
+    def _profile_thresholds(self) -> Dict[str, Optional[float]]:
+        return {
+            profile_id: settings.threshold
+            for profile_id, settings in self.config.processing.profile_settings.items()
+        }
+
+    def _print_decision_comparison(self, items: List[ContentItem]) -> None:
+        """Log how the decision model's scores track the main model's."""
+        comparison = compare_decision_scores(
+            items,
+            self._profile_thresholds(),
+            top_n=self.config.digest.max_items or 20,
+        )
+        if not comparison.compared:
+            return
+        detail = self.icons["detail"]
+        self.console.print(
+            f"   Decision vs main model on {comparison.compared} items: "
+            f"mean gap {comparison.mean_abs_gap:.2f}, "
+            f"bias {comparison.mean_bias:+.2f}"
+        )
+        if comparison.threshold_compared:
+            self.console.print(
+                f"      {detail} same side of the threshold: "
+                f"{comparison.threshold_agreements}/{comparison.threshold_compared}"
+            )
+        self.console.print(
+            f"      {detail} top {comparison.top_n} overlap: "
+            f"{comparison.top_overlap}/{comparison.top_n}"
+        )
+        for title, decision, main in comparison.largest_gaps:
+            self.console.print(
+                f"      {detail} decision {decision:.1f} / main {main:.1f}: {title[:80]}"
+            )
 
     async def _generate_summary(
         self,

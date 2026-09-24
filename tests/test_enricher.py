@@ -580,3 +580,78 @@ def test_history_search_reuses_one_call_for_both_languages(tmp_path, monkeypatch
         assert artifact.sources[0].url == "https://example.com/preview"
         assert artifact.sources[0].title.startswith("2026-04-01")
         assert artifact.blocks[-1].source_refs == ["tool-1-1"]
+
+
+def _untagged_item() -> ContentItem:
+    item = make_item()
+    item.processing.analysis = ContentAnalysis(
+        score=7.0,
+        reason="Scored by the decision model",
+        summary="A project released a new architecture.",
+        score_source="decision",
+    )
+    return item
+
+
+def _artifact_response(**extra) -> str:
+    return json.dumps(
+        {
+            "title": "Technical release",
+            "blocks": [
+                {
+                    "id": "summary",
+                    "title": "Summary",
+                    "content": "A project released a new architecture.",
+                    "source_refs": [],
+                },
+                {
+                    "id": "background",
+                    "title": "Background",
+                    "content": "The previous architecture had known limits.",
+                    "source_refs": [],
+                },
+            ],
+            **extra,
+        }
+    )
+
+
+def test_enrichment_writes_tags_when_analysis_has_none():
+    responses = iter(
+        [
+            json.dumps({"tool_requests": []}),
+            _artifact_response(tags=["#Kubernetes", "kubernetes", " Helm ", ""]),
+        ]
+    )
+    requests = []
+
+    async def complete(**kwargs):
+        requests.append(kwargs)
+        return next(responses)
+
+    item = _untagged_item()
+    enricher = ContentEnricher(
+        SimpleNamespace(complete=complete), PROFILES, ["en"], tools=FakeTools()
+    )
+    asyncio.run(enricher._enrich_item(item))
+
+    assert item.processing.analysis.tags == ["Kubernetes", "Helm"]
+    assert '"tags"' in requests[1]["system"]
+
+
+def test_enrichment_does_not_ask_for_tags_the_analysis_already_has():
+    responses = iter([json.dumps({"tool_requests": []}), _artifact_response()])
+    requests = []
+
+    async def complete(**kwargs):
+        requests.append(kwargs)
+        return next(responses)
+
+    item = make_item()
+    enricher = ContentEnricher(
+        SimpleNamespace(complete=complete), PROFILES, ["en"], tools=FakeTools()
+    )
+    asyncio.run(enricher._enrich_item(item))
+
+    assert item.processing.analysis.tags == ["systems"]
+    assert '"tags"' not in requests[1]["system"]

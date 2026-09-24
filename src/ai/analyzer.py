@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
 from typing import List, Mapping, Optional
 from pydantic import ValidationError
 from rich.console import Console
@@ -26,6 +27,20 @@ from ..processing.content import select_content, split_content
 from ..processing.profiles import ProfileRegistry
 
 DEFAULT_THROTTLE_SEC = 0.0
+EXCERPT_CHARS = 300
+
+
+def source_excerpt(content: str, limit: int = EXCERPT_CHARS) -> str:
+    """First ``limit`` characters of the content, cut on a word boundary.
+
+    Stands in for the main model's summary when the decision model scores
+    alone: topic deduplication and enrichment read it as a hint only.
+    """
+    text = " ".join((content or "").split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(" ", 1)[0]
+    return f"{cut}…"
 
 class ContentAnalyzer:
     """Analyzes content items using AI to determine importance."""
@@ -166,7 +181,12 @@ class ContentAnalyzer:
 
         discussion_section = "\n".join(discussion_parts) if discussion_parts else ""
 
-        if await self._prefilter(item, profile, selected_content, discussion_section):
+        decision_score = await self._decision_score(
+            item, profile, selected_content, discussion_section
+        )
+        if decision_score is not None and self._settle_with_decision(
+            item, profile, decision_score, selected_content
+        ):
             return
 
         # Generate user prompt
@@ -206,6 +226,7 @@ class ContentAnalyzer:
             return
 
         if item.processing:
+            result.decision_score = decision_score
             item.processing.analysis = result
 
     def _prefilter_cutoff(self, profile_id: str) -> Optional[float]:
@@ -217,23 +238,19 @@ class ContentAnalyzer:
             return None
         return threshold - self.decision_client.config.prefilter_margin
 
-    async def _prefilter(
+    def _final_scoring(self) -> bool:
+        return self.decision_client is not None and self.decision_client.config.final_scoring
+
+    async def _decision_score(
         self,
         item: ContentItem,
         profile,
         content: str,
         discussion: str,
-    ) -> bool:
-        """Score with the decision model; True when the item is settled as rejected.
-
-        The decision score is final only for items clearly below the profile
-        threshold: they never reach the digest, so the summary and tags the
-        main model would write are not needed. Any failure lets the main model
-        analyze the item as usual.
-        """
-        cutoff = self._prefilter_cutoff(profile.id)
-        if cutoff is None:
-            return False
+    ) -> Optional[float]:
+        """The decision model's 1-10 score, or None when it is not used or fails."""
+        if not self._final_scoring() and self._prefilter_cutoff(profile.id) is None:
+            return None
         try:
             answers = await self.decision_client.decide(
                 item_state(item, content, discussion),
@@ -246,21 +263,47 @@ class ContentAnalyzer:
                 item.id,
                 exc,
             )
-            return False
+            return None
         if score is None:
-            return False
-        score = level_to_score(score)
-        if score >= cutoff:
-            return False
-        if item.processing:
-            item.processing.analysis = ContentAnalysis(
-                score=round(score, 2),
-                reason=(
-                    f"Rejected by the decision model "
-                    f"({self.decision_client.config.model}) before full analysis"
-                ),
-                summary=item.title,
+            return None
+        return round(level_to_score(score), 2)
+
+    def _settle_with_decision(
+        self,
+        item: ContentItem,
+        profile,
+        score: float,
+        content: str,
+    ) -> bool:
+        """Store a decision-only analysis; True when the main model is not needed.
+
+        With ``final_scoring`` the decision score is authoritative for every
+        item. As a prefilter it is final only for items clearly below the
+        profile threshold: they never reach the digest, so the summary and tags
+        the main model would write are not needed.
+        """
+        model = self.decision_client.config.model
+        if self._final_scoring():
+            analysis = ContentAnalysis(
+                score=score,
+                reason=f"Scored by the decision model ({model})",
+                summary=source_excerpt(content) or item.title,
+                decision_score=score,
+                score_source="decision",
             )
+        else:
+            cutoff = self._prefilter_cutoff(profile.id)
+            if cutoff is None or score >= cutoff:
+                return False
+            analysis = ContentAnalysis(
+                score=score,
+                reason=f"Rejected by the decision model ({model}) before full analysis",
+                summary=item.title,
+                decision_score=score,
+                score_source="decision",
+            )
+        if item.processing:
+            item.processing.analysis = analysis
         return True
 
     @classmethod
@@ -280,3 +323,71 @@ class ContentAnalyzer:
         if result.score is None:
             return None, "score is required by the analysis contract"
         return result, ""
+
+
+@dataclass
+class DecisionComparison:
+    """How the decision model's scores compare with the main model's."""
+
+    compared: int = 0
+    mean_abs_gap: float = 0.0
+    # Positive when the decision model scores higher on average.
+    mean_bias: float = 0.0
+    threshold_agreements: int = 0
+    threshold_compared: int = 0
+    top_n: int = 0
+    top_overlap: int = 0
+    # (title, decision score, main score), largest gaps first.
+    largest_gaps: list[tuple[str, float, float]] = field(default_factory=list)
+
+
+def compare_decision_scores(
+    items: List[ContentItem],
+    profile_thresholds: Mapping[str, Optional[float]],
+    *,
+    top_n: int = 20,
+    gaps: int = 5,
+) -> DecisionComparison:
+    """Compare both scores on items the main model analyzed after the decision model.
+
+    Items settled by the decision model alone carry no main score and are
+    left out; with ``prefilter_margin`` at 10 every item is compared.
+    """
+    pairs = []
+    for item in items:
+        analysis = item.processing.analysis if item.processing else None
+        if (
+            analysis is None
+            or analysis.score_source != "main"
+            or analysis.score is None
+            or analysis.decision_score is None
+        ):
+            continue
+        pairs.append((item, analysis.decision_score, analysis.score))
+    if not pairs:
+        return DecisionComparison()
+
+    result = DecisionComparison(compared=len(pairs))
+    result.mean_abs_gap = sum(abs(d - m) for _, d, m in pairs) / len(pairs)
+    result.mean_bias = sum(d - m for _, d, m in pairs) / len(pairs)
+    for item, decision, main in pairs:
+        threshold = profile_thresholds.get(item.processing.classification.profile)
+        if threshold is None:
+            continue
+        result.threshold_compared += 1
+        if (decision >= threshold) == (main >= threshold):
+            result.threshold_agreements += 1
+    result.top_n = min(top_n, len(pairs))
+    by_decision = sorted(pairs, key=lambda pair: pair[1], reverse=True)[: result.top_n]
+    by_main = sorted(pairs, key=lambda pair: pair[2], reverse=True)[: result.top_n]
+    result.top_overlap = len(
+        {id(pair[0]) for pair in by_decision} & {id(pair[0]) for pair in by_main}
+    )
+    result.largest_gaps = [
+        (item.title, decision, main)
+        for item, decision, main in sorted(
+            pairs, key=lambda pair: abs(pair[1] - pair[2]), reverse=True
+        )[:gaps]
+        if decision != main
+    ]
+    return result
