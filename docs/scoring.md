@@ -22,7 +22,9 @@ in the runtime configuration.
    Available comments and engagement metadata are added separately.
 3. **Decision prefilter** (optional, `ai.decision.prefilter`) — The decision
    model scores the item against the same `analysis.md`; an item clearly below
-   its profile threshold keeps that score and skips the next step.
+   its profile threshold keeps that score and skips the next step. With
+   `ai.decision.final_scoring`, every item keeps the decision score and skips the
+   next step; enrichment then writes the tags of the items that reach the digest.
 4. **Profile analysis** — The selected profile's `analysis.md` prompt evaluates
    the item and returns a score, reason, one-sentence summary, and tags.
 5. **Validation and retry** — Responses are parsed as JSON. Failed AI calls are

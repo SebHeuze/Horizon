@@ -62,6 +62,11 @@ class ContentAnalysis(BaseModel):
     reason: str
     summary: str
     tags: List[str] = Field(default_factory=list)
+    # The decision model's own score, kept next to the main model's so the two
+    # can be compared (see ai.decision.final_scoring).
+    decision_score: Optional[float] = Field(default=None, ge=0, le=10, allow_inf_nan=False)
+    # Which model produced `score`: "main" or "decision".
+    score_source: Literal["main", "decision"] = "main"
 
 
 class ArtifactSource(BaseModel):
@@ -207,6 +212,11 @@ class DecisionConfig(BaseModel):
     # never reach the digest, so they need no summary.
     prefilter: bool = False
     prefilter_margin: float = Field(default=1.0, ge=0, le=10)
+    # Make the decision score authoritative for every item: the main model's
+    # analysis is skipped, the summary becomes a source excerpt and the tags
+    # are written during enrichment. Items the decision model cannot score
+    # still fall back to the main model. Makes `prefilter` irrelevant.
+    final_scoring: bool = False
 
 
 class AIConfig(BaseModel):

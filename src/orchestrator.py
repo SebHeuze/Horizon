@@ -29,11 +29,11 @@ from .scrapers.ossinsight import OSSInsightScraper
 from .scrapers.gdelt import GDELTScraper
 from .scrapers.google_news import GoogleNewsScraper
 from .ai.client import create_ai_client
-from .ai.analyzer import ContentAnalyzer
+from .ai.analyzer import ContentAnalyzer, compare_decision_scores
 from .ai.decisions import create_decision_client
 from .ai.summarizer import DailySummarizer
 from .ai.enricher import ContentEnricher, EnrichmentBatchResult
-from .ai.tokens import get_usage_snapshot
+from .ai.tokens import get_usage_snapshot, usage_stage
 from .processing import ProfileRegistry
 from .processing.tools import ToolRegistry
 
@@ -407,6 +407,17 @@ class HorizonOrchestrator:
                         f"   {self.icons['detail']} {provider}: {u.total} tokens "
                         f"(in: {u.input_tokens}, out: {u.output_tokens})"
                     )
+                self.console.print("   By stage:")
+                for stage, providers in usage.per_stage.items():
+                    parts = ", ".join(
+                        f"{provider} {u.input_tokens}/{u.output_tokens}"
+                        for provider, u in sorted(providers.items())
+                        if u.total > 0
+                    )
+                    if parts:
+                        self.console.print(
+                            f"   {self.icons['detail']} {stage}: {parts} (in/out)"
+                        )
 
         except Exception as e:
             self.console.print(
@@ -674,10 +685,11 @@ class HorizonOrchestrator:
 
         try:
             ai_client = create_ai_client(self.config.ai)
-            response = await ai_client.complete(
-                system=TOPIC_DEDUP_SYSTEM,
-                user=TOPIC_DEDUP_USER.format(items=items_text),
-            )
+            with usage_stage("topic_dedup"):
+                response = await ai_client.complete(
+                    system=TOPIC_DEDUP_SYSTEM,
+                    user=TOPIC_DEDUP_USER.format(items=items_text),
+                )
             result = parse_json_response(response)
             if result is None:
                 if log:
@@ -1033,7 +1045,8 @@ class HorizonOrchestrator:
         self.console.print(
             f"   Re-analyzing {len(expanded)} Twitter items with reply context...\n"
         )
-        await self._create_analyzer().analyze_batch(expanded)
+        with usage_stage("twitter_expansion"):
+            await self._create_analyzer().analyze_batch(expanded)
 
     async def enrich_items(self, items: List[ContentItem]) -> EnrichmentBatchResult:
         """Enrich items with background knowledge (2nd AI pass).
@@ -1058,7 +1071,8 @@ class HorizonOrchestrator:
             console=self.console,
             tools=ToolRegistry(self.storage.summaries_dir),
         )
-        result = await enricher.enrich_batch(items)
+        with usage_stage("enrichment"):
+            result = await enricher.enrich_batch(items)
         self.console.print(
             f"   Enriched {result.succeeded_count}/{len(items)} items"
         )
@@ -1081,7 +1095,10 @@ class HorizonOrchestrator:
         """
         self.console.print(f"{self.icons['ai']} Analyzing content with AI...")
 
-        return await self._create_analyzer().analyze_batch(items)
+        with usage_stage("analysis"):
+            analyzed = await self._create_analyzer().analyze_batch(items)
+        self._print_decision_comparison(analyzed)
+        return analyzed
 
     def _create_analyzer(self) -> ContentAnalyzer:
         """Build the analyzer, with the decision model when one is configured."""
@@ -1092,6 +1109,7 @@ class HorizonOrchestrator:
                 for name, enabled in (
                     ("classification", decision_client.config.classification),
                     ("prefilter", decision_client.config.prefilter),
+                    ("final scoring", decision_client.config.final_scoring),
                 )
                 if enabled
             ]
@@ -1104,11 +1122,43 @@ class HorizonOrchestrator:
             self.profiles,
             console=self.console,
             decision_client=decision_client,
-            profile_thresholds={
-                profile_id: settings.threshold
-                for profile_id, settings in self.config.processing.profile_settings.items()
-            },
+            profile_thresholds=self._profile_thresholds(),
         )
+
+    def _profile_thresholds(self) -> Dict[str, Optional[float]]:
+        return {
+            profile_id: settings.threshold
+            for profile_id, settings in self.config.processing.profile_settings.items()
+        }
+
+    def _print_decision_comparison(self, items: List[ContentItem]) -> None:
+        """Log how the decision model's scores track the main model's."""
+        comparison = compare_decision_scores(
+            items,
+            self._profile_thresholds(),
+            top_n=self.config.digest.max_items or 20,
+        )
+        if not comparison.compared:
+            return
+        detail = self.icons["detail"]
+        self.console.print(
+            f"   Decision vs main model on {comparison.compared} items: "
+            f"mean gap {comparison.mean_abs_gap:.2f}, "
+            f"bias {comparison.mean_bias:+.2f}"
+        )
+        if comparison.threshold_compared:
+            self.console.print(
+                f"      {detail} same side of the threshold: "
+                f"{comparison.threshold_agreements}/{comparison.threshold_compared}"
+            )
+        self.console.print(
+            f"      {detail} top {comparison.top_n} overlap: "
+            f"{comparison.top_overlap}/{comparison.top_n}"
+        )
+        for title, decision, main in comparison.largest_gaps:
+            self.console.print(
+                f"      {detail} decision {decision:.1f} / main {main:.1f}: {title[:80]}"
+            )
 
     async def _generate_summary(
         self,

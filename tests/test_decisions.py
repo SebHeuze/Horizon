@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from src.ai.analyzer import ContentAnalyzer
+from src.ai.analyzer import ContentAnalyzer, compare_decision_scores
 from src.ai.classifier import ContentClassifier
 from src.ai.decisions import (
     DecisionAnswer,
@@ -16,7 +16,15 @@ from src.ai.decisions import (
     create_decision_client,
 )
 from src.ai.prompting.decisions import MAX_SCORE_LEVELS, SCORE_LEVELS, level_to_score
-from src.models import AIConfig, ContentItem, DecisionConfig, SourceType
+from src.models import (
+    AIConfig,
+    ClassificationResult,
+    ContentAnalysis,
+    ContentItem,
+    DecisionConfig,
+    ProcessingResult,
+    SourceType,
+)
 from src.processing import ProfileRegistry
 
 
@@ -258,3 +266,86 @@ def test_main_model_analyzes_when_prefilter_cannot_decide(decision, thresholds):
 
     assert len(calls) == 1
     assert item.processing.analysis.score == 8
+
+
+# --- final scoring and comparison ------------------------------------------
+
+
+def test_final_scoring_skips_the_main_model():
+    decision = FakeDecisionClient(
+        answers={"importance": {"type": "score", "score": 6.5}}, final_scoring=True
+    )
+    item = _item()
+    item.content = "word " * 200
+
+    item, calls = _analyze(decision, {}, item)
+
+    assert calls == []
+    analysis = item.processing.analysis
+    assert analysis.score == 7.5
+    assert analysis.decision_score == 7.5
+    assert analysis.score_source == "decision"
+    assert analysis.tags == []
+    assert analysis.summary.endswith("…")
+    assert len(analysis.summary) <= 301
+
+
+def test_final_scoring_falls_back_to_main_model_on_failure():
+    decision = FakeDecisionClient(error=DecisionError("down"), final_scoring=True)
+
+    item, calls = _analyze(decision, {"tech-news": 6.0})
+
+    assert len(calls) == 1
+    assert item.processing.analysis.score == 8
+    assert item.processing.analysis.score_source == "main"
+    assert item.processing.analysis.decision_score is None
+
+
+def test_prefilter_keeps_the_decision_score_next_to_the_main_score():
+    decision = FakeDecisionClient(
+        answers={"importance": {"type": "score", "score": 5.2}}, prefilter=True
+    )
+
+    item, _ = _analyze(decision, {"tech-news": 6.0})
+
+    assert item.processing.analysis.score == 8
+    assert item.processing.analysis.decision_score == 6.2
+    assert item.processing.analysis.score_source == "main"
+
+
+def _scored(title, decision, main, source="main"):
+    item = _item()
+    item.title = title
+    item.processing = ProcessingResult(
+        classification=ClassificationResult(profile="tech-news", method="source_override"),
+        analysis=ContentAnalysis(
+            score=main,
+            reason="r",
+            summary="s",
+            decision_score=decision,
+            score_source=source,
+        ),
+    )
+    return item
+
+
+def test_compare_decision_scores():
+    items = [
+        _scored("a", 8.0, 9.0),
+        _scored("b", 7.0, 5.0),
+        _scored("c", 4.0, 4.0),
+        _scored("rejected", 2.0, 2.0, source="decision"),
+    ]
+
+    comparison = compare_decision_scores(items, {"tech-news": 6.0}, top_n=2)
+
+    assert comparison.compared == 3
+    assert comparison.mean_abs_gap == pytest.approx(1.0)
+    assert comparison.mean_bias == pytest.approx(1 / 3)
+    assert (comparison.threshold_agreements, comparison.threshold_compared) == (2, 3)
+    assert (comparison.top_overlap, comparison.top_n) == (2, 2)
+    assert comparison.largest_gaps[0] == ("b", 7.0, 5.0)
+
+
+def test_compare_decision_scores_without_pairs():
+    assert compare_decision_scores([_scored("x", None, 5.0)], {}).compared == 0

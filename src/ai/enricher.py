@@ -48,9 +48,27 @@ class ToolPlan(BaseModel):
     tool_requests: list[ToolRequest] = Field(default_factory=list)
 
 
+MAX_TAGS = 5
+
+
+def clean_tags(tags: list[str]) -> list[str]:
+    """Trim, de-duplicate case-insensitively and cap generated tags."""
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for tag in tags:
+        value = str(tag).strip().lstrip("#").strip()
+        if value and value.casefold() not in seen:
+            seen.add(value.casefold())
+            cleaned.append(value)
+    return cleaned[:MAX_TAGS]
+
+
 class GeneratedArtifact(BaseModel):
     title: str
     blocks: list[ContentBlock]
+    # Only requested when the analysis left the item without tags (decision
+    # model scoring); otherwise the model is not asked and this stays empty.
+    tags: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_non_empty_content(self) -> "GeneratedArtifact":
@@ -65,6 +83,7 @@ class GeneratedArtifact(BaseModel):
 class GeneratedBlock(BaseModel):
     title: str = ""
     block: Optional[ContentBlock] = None
+    tags: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_non_empty_block(self) -> "GeneratedBlock":
@@ -222,12 +241,20 @@ class ContentEnricher:
             item.processing.artifacts.pop(language, None)
         tool_results = await self._plan_and_execute_tools(item, profile)
         sources = self._sources_from_tool_results(tool_results)
+        needs_tags = not (item.processing.analysis.tags)
 
         artifacts = {}
-        for language in self.languages:
+        for index, language in enumerate(self.languages):
             generated = await self._generate_artifact(
-                item, profile, language, tool_results
+                item,
+                profile,
+                language,
+                tool_results,
+                request_tags=needs_tags and index == 0,
             )
+            if needs_tags and generated.tags:
+                item.processing.analysis.tags = clean_tags(generated.tags)
+                needs_tags = False
             self._expand_request_source_refs(generated.blocks, tool_results)
             self._validate_blocks(generated.blocks, profile, tool_results)
             generated.title = normalize_language(generated.title, language)
@@ -320,6 +347,8 @@ class ContentEnricher:
         profile: LoadedProfile,
         language: str,
         tool_results: list[ToolResult],
+        *,
+        request_tags: bool = False,
     ) -> GeneratedArtifact:
         configured_blocks = profile.definition.enrichment.blocks
         result_block_ids = {result.block_id for result in tool_results}
@@ -327,6 +356,7 @@ class ContentEnricher:
             block for block in configured_blocks if block.id not in result_block_ids
         ]
         title = ""
+        tags: list[str] = []
         generated_by_id: dict[str, ContentBlock] = {}
 
         if base_blocks:
@@ -352,7 +382,9 @@ class ContentEnricher:
 
             generated = await self._complete_model(
                 GeneratedArtifact,
-                system=artifact_prompt(profile, language, base_blocks),
+                system=artifact_prompt(
+                    profile, language, base_blocks, request_tags=request_tags
+                ),
                 user=(
                     item_context(item, profile, include_content=True)
                     + "\n\n# Tool results\n\nNo tool results are available to these blocks."
@@ -361,6 +393,7 @@ class ContentEnricher:
                 validator=validate_required_blocks,
             )
             title = generated.title.strip()
+            tags = generated.tags
             allowed_ids = {block.id for block in base_blocks}
             configured_ids = {block.id for block in configured_blocks}
             for generated_block in generated.blocks:
@@ -410,6 +443,7 @@ class ContentEnricher:
                     language,
                     block,
                     include_header=not title,
+                    request_tags=request_tags and not title,
                 ),
                 user=(
                     item_context(item, profile, include_content=True)
@@ -422,6 +456,7 @@ class ContentEnricher:
 
             if not title:
                 title = generated.title.strip()
+                tags = generated.tags
             if generated.block is None:
                 if not block.optional:
                     raise ValueError(f"Artifact is missing required block: {block.id}")
@@ -442,7 +477,7 @@ class ContentEnricher:
         configured_by_id = {block.id: block for block in configured_blocks}
         for generated_block in blocks:
             generated_block.primary = configured_by_id[generated_block.id].primary
-        return GeneratedArtifact(title=title, blocks=blocks)
+        return GeneratedArtifact(title=title, blocks=blocks, tags=tags)
 
     @staticmethod
     def _sources_from_tool_results(

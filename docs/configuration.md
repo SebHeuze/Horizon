@@ -351,6 +351,21 @@ keeps everything that produces text:
 - A prefiltered item keeps its title as summary and has no tags. Lowering the
   threshold afterwards (for example through an MCP `threshold` argument) can let
   such items through with that minimal analysis.
+- Every item the decision model scores keeps that score as
+  `analysis.decision_score`, next to the main model's `score`. After analysis
+  the run logs how the two compare on the items both models scored: mean gap,
+  bias, how many land on the same side of the threshold, the overlap of both
+  top-`digest.max_items` rankings, and the largest disagreements. Setting
+  `prefilter_margin` to `10` sends every item to the main model and so compares
+  all of them, at the cost of the full analysis.
+- `final_scoring` (default `false`): the decision score becomes authoritative
+  for every item and the main model's analysis is skipped. The summary becomes
+  the first 300 characters of the source (read by topic deduplication and as a
+  hint by enrichment), and the tags are written by enrichment for the items that
+  reach the digest. Items the decision model cannot score still get the full
+  analysis. Thresholds tuned on the main model may need adjusting: the decision
+  ladder has 10 levels. Check the comparison log over a few runs before turning
+  it on.
 
 **Custom Base URL** (for proxies):
 

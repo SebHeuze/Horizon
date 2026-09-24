@@ -8,6 +8,11 @@ from .common import EVIDENCE_RULES, UNTRUSTED_INPUT_RULE
 
 MAX_TOOL_REQUESTS = 3
 
+TAGS_INSTRUCTION = (
+    "Set `tags` to three to five short English topic tags naming the specific "
+    "technologies, products, projects or organizations the item is about."
+)
+
 GROUNDING_RULES = f"""- Treat the source item as the primary account of what happened.
 - Use tool results only as supporting context or fact verification, never as a replacement for the source.
 - {UNTRUSTED_INPUT_RULE}
@@ -65,12 +70,16 @@ def block_prompt(
     block: ProfileBlock,
     *,
     include_header: bool,
+    request_tags: bool = False,
 ) -> str:
     header_instruction = (
         "Set `title` to the localized artifact title."
         if include_header
         else "Return an empty string for `title`."
     )
+    if request_tags:
+        header_instruction += f" {TAGS_INSTRUCTION}"
+    tags_field = '\n  "tags": ["<tag>"],' if request_tags else ""
     optional_instruction = (
         "Set `block` to null when there is no useful content."
         if block.optional
@@ -93,7 +102,7 @@ Generate only block `{block.id}`. {optional_instruction}
 
 Return valid JSON only:
 {{
-  "title": "<localized artifact title or empty string>",
+  "title": "<localized artifact title or empty string>",{tags_field}
   "block": {{
     "id": "{block.id}",
     "title": "<short localized heading>",
@@ -109,7 +118,11 @@ def artifact_prompt(
     profile: LoadedProfile,
     language: str,
     blocks: list[ProfileBlock],
+    *,
+    request_tags: bool = False,
 ) -> str:
+    tags_instruction = f"\n\n{TAGS_INSTRUCTION}" if request_tags else ""
+    tags_field = '\n  "tags": ["<tag>"],' if request_tags else ""
     block_contract = "\n".join(
         f"- `{block.id}`"
         + (" optional" if block.optional else " required")
@@ -128,11 +141,11 @@ Write the complete artifact in {target_language_instruction(language)}.
 # Block contract
 
 Generate only these blocks:
-{block_contract}
+{block_contract}{tags_instruction}
 
 Return valid JSON only:
 {{
-  "title": "<localized artifact title>",
+  "title": "<localized artifact title>",{tags_field}
   "blocks": [
     {{
       "id": "<configured block ID>",
