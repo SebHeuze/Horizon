@@ -267,6 +267,9 @@ class GitHubSourceConfig(BaseModel):
     # repo_releases only. Fold every release of the window into one item, so a
     # repository shipping several times a day takes a single digest slot.
     collapse_releases: bool = False
+    # repo_releases only. False drops releases GitHub flags as pre-releases
+    # (release candidates, betas), whatever their version number.
+    include_prereleases: bool = True
 
 
 class HackerNewsConfig(BaseModel):

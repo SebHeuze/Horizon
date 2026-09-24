@@ -230,6 +230,12 @@ class GitHubScraper(BaseScraper):
                 if published_at < since:
                     continue
 
+                if release.get("prerelease") and not source.include_prereleases:
+                    logger.debug(
+                        "Skipping %s/%s pre-release %s", owner, repo, release["tag_name"]
+                    )
+                    continue
+
                 if not keeps_release(release["tag_name"], source.release_level):
                     logger.debug(
                         "Skipping %s/%s %s below release_level=%s",

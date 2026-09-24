@@ -81,6 +81,11 @@ Two source types are supported:
   other tags, and all changelogs chained newest first. One digest slot per
   repository, however often it ships.
 
+- `include_prereleases` (default `true`) — `repo_releases` only. `false` drops
+  the releases GitHub flags as pre-releases (release candidates, betas),
+  whatever their version number: `release_level` alone would keep a
+  `v2.16.0-rc1`, whose number reads as a minor bump.
+
 For a project that releases several times a day (Renovate, n8n), combine
 both: `"release_level": "minor", "collapse_releases": true`.
 

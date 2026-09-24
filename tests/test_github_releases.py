@@ -108,3 +108,15 @@ def test_collapse_keeps_single_release_untouched():
     items = _fetch(source, _RELEASES[:1])
     assert items[0].title == "acme/tool released 44.108.2"
     assert "collapsed_tags" not in items[0].metadata
+
+
+def test_prereleases_can_be_excluded():
+    releases = [
+        {**_release(2, "v2.16.0-rc1", 1), "prerelease": True},
+        _release(1, "v2.15.0", 3),
+    ]
+    source = GitHubSourceConfig(type="repo_releases", owner="acme", repo="tool")
+    assert len(_fetch(source, releases)) == 2
+
+    source = source.model_copy(update={"include_prereleases": False})
+    assert [item.metadata["tag"] for item in _fetch(source, releases)] == ["v2.15.0"]

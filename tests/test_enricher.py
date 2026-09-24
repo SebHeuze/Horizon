@@ -655,3 +655,20 @@ def test_enrichment_does_not_ask_for_tags_the_analysis_already_has():
 
     assert item.processing.analysis.tags == ["systems"]
     assert '"tags"' not in requests[1]["system"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Kubernetes, Helm", ["Kubernetes", "Helm"]),
+        ({"not": "a list"}, []),
+        (["Docker", 3, None], ["Docker", "3"]),
+    ],
+)
+def test_malformed_tags_never_fail_the_artifact(raw, expected):
+    from src.ai.enricher import GeneratedArtifact, clean_tags
+
+    artifact = GeneratedArtifact.model_validate(
+        {"title": "Title", "blocks": [], "tags": raw}
+    )
+    assert clean_tags(artifact.tags) == expected
