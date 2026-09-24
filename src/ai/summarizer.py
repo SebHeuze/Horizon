@@ -1,5 +1,6 @@
 """Daily summary generation — pure programmatic rendering."""
 
+import math
 import html
 import re
 from dataclasses import dataclass
@@ -132,6 +133,18 @@ LABELS = {
 }
 
 
+def display_score(score: Optional[float]) -> int | str:
+    """Score as shown to readers: a whole number, or "?" when unknown.
+
+    The decision model returns fractional scores (7.62); they stay exact in
+    the analysis, where they rank items and meet thresholds, and are only
+    rounded here. Halves round up, unlike round()'s banker's rounding.
+    """
+    if score is None:
+        return "?"
+    return int(math.floor(score + 0.5))
+
+
 @dataclass(frozen=True)
 class SummaryItemView:
     item: ContentItem
@@ -139,7 +152,7 @@ class SummaryItemView:
     global_index: int
     group_count: int
     title: str
-    score: float | str
+    score: int | str
     anchor_id: str
 
 
@@ -223,10 +236,8 @@ class DailySummarizer:
                         title=normalize_language(
                             artifact.title if artifact else item.title, language
                         ),
-                        score=(
-                            analysis.score
-                            if analysis and analysis.score is not None
-                            else "?"
+                        score=display_score(
+                            analysis.score if analysis else None
                         ),
                         anchor_id=self._item_anchor(profile_id, index),
                     )
@@ -408,9 +419,7 @@ class DailySummarizer:
         score = (
             score_override
             if score_override is not None
-            else analysis.score
-            if analysis and analysis.score is not None
-            else "?"
+            else display_score(analysis.score if analysis else None)
         )
         meta = item.metadata
 
