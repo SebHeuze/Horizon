@@ -29,7 +29,7 @@ from .scrapers.ossinsight import OSSInsightScraper
 from .scrapers.gdelt import GDELTScraper
 from .scrapers.google_news import GoogleNewsScraper
 from .ai.client import create_ai_client
-from .ai.analyzer import ContentAnalyzer, compare_decision_scores
+from .ai.analyzer import ContentAnalyzer, compare_decision_scores, threshold_report
 from .ai.decisions import create_decision_client
 from .ai.summarizer import DailySummarizer
 from .ai.enricher import ContentEnricher, EnrichmentBatchResult
@@ -1098,7 +1098,23 @@ class HorizonOrchestrator:
         with usage_stage("analysis"):
             analyzed = await self._create_analyzer().analyze_batch(items)
         self._print_decision_comparison(analyzed)
+        self._print_threshold_report(analyzed)
         return analyzed
+
+    def _print_threshold_report(self, items: List[ContentItem]) -> None:
+        """Log, per profile, how many items met the threshold and the closest misses."""
+        reports = threshold_report(items, self._profile_thresholds())
+        if not reports:
+            return
+        detail = self.icons["detail"]
+        self.console.print("   Threshold check:")
+        for report in reports:
+            self.console.print(
+                f"      {detail} {report.profile_id} (>= {report.threshold:g}): "
+                f"{report.passed}/{report.total} passed"
+            )
+            for score, title in report.near_misses:
+                self.console.print(f"          {score:.2f}  {title[:80]}")
 
     def _create_analyzer(self) -> ContentAnalyzer:
         """Build the analyzer, with the decision model when one is configured."""

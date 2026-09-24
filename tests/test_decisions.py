@@ -349,3 +349,28 @@ def test_compare_decision_scores():
 
 def test_compare_decision_scores_without_pairs():
     assert compare_decision_scores([_scored("x", None, 5.0)], {}).compared == 0
+
+
+def test_threshold_report_counts_passes_and_closest_misses():
+    from src.ai.analyzer import threshold_report
+
+    items = [
+        _scored("hit", None, 8.0),
+        _scored("close", None, 7.2),
+        _scored("closer", None, 7.4),
+        _scored("far", None, 3.0),
+        _scored("farther", None, 2.0),
+    ]
+    unscored = _scored("unscored", None, None)
+
+    (report,) = threshold_report(items + [unscored], {"tech-news": 7.5}, near_misses=3)
+
+    assert (report.profile_id, report.threshold) == ("tech-news", 7.5)
+    assert (report.passed, report.total) == (1, 6)
+    assert report.near_misses == [(7.4, "closer"), (7.2, "close"), (3.0, "far")]
+
+
+def test_threshold_report_skips_profiles_without_threshold():
+    from src.ai.analyzer import threshold_report
+
+    assert threshold_report([_scored("x", None, 5.0)], {}) == []

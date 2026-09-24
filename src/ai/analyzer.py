@@ -391,3 +391,51 @@ def compare_decision_scores(
         if decision != main
     ]
     return result
+
+
+@dataclass
+class ProfileThresholdReport:
+    """How the items of one profile fared against its threshold."""
+
+    profile_id: str
+    threshold: float
+    total: int = 0
+    passed: int = 0
+    # (score, title) of the best items left under the threshold, best first.
+    near_misses: list[tuple[float, str]] = field(default_factory=list)
+
+
+def threshold_report(
+    items: List[ContentItem],
+    profile_thresholds: Mapping[str, Optional[float]],
+    *,
+    near_misses: int = 3,
+) -> list[ProfileThresholdReport]:
+    """Per profile with a threshold: items seen, items passing, closest misses.
+
+    Makes a strict scorer visible: a profile that lets nothing through shows
+    how far below the line its best items stopped.
+    """
+    reports: dict[str, ProfileThresholdReport] = {}
+    misses: dict[str, list[tuple[float, str]]] = {}
+    for item in items:
+        if not item.processing or not item.processing.analysis:
+            continue
+        profile_id = item.processing.classification.profile
+        threshold = profile_thresholds.get(profile_id)
+        if threshold is None:
+            continue
+        report = reports.setdefault(
+            profile_id, ProfileThresholdReport(profile_id, threshold)
+        )
+        report.total += 1
+        score = item.processing.analysis.score
+        if score is not None and score >= threshold:
+            report.passed += 1
+        elif score is not None:
+            misses.setdefault(profile_id, []).append((score, item.title))
+    for profile_id, report in reports.items():
+        report.near_misses = sorted(
+            misses.get(profile_id, []), key=lambda miss: miss[0], reverse=True
+        )[:near_misses]
+    return sorted(reports.values(), key=lambda report: report.profile_id)
