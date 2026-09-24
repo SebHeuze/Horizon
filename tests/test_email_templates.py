@@ -195,7 +195,7 @@ def test_rich_rendering_includes_badge_tags_and_references(monkeypatch, tmp_path
     _, html_body = _send(manager, **_rich_kwargs())
 
     assert "#be185d" in html_body  # score tier "high" badge colour
-    assert ">9.0<" in html_body  # badge shows the bare score, no "/10"
+    assert ">9<" in html_body  # badge shows the bare, rounded score, no "/10"
     assert "#github" in html_body and "#workflow" in html_body
     assert 'href="https://github.blog/changelog/stacked-prs/"' in html_body
     assert "References" in html_body

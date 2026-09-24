@@ -33,6 +33,8 @@ in the runtime configuration.
 6. **Profile filtering** — If a runtime threshold is configured for the resolved
    profile, only items meeting it continue. Without a threshold, analyzed items
    continue without score filtering.
+   After analysis the run logs, per profile with a threshold, how many items
+   passed and the scores and titles of the three closest misses.
 7. **Digest selection** — Topic deduplication runs within each profile. Optional
    category quotas and a final item cap select the items to enrich.
 

@@ -469,3 +469,13 @@ def test_generate_summary_preserves_normal_http_links():
     assert "[Important Item 1](https://example.com/items/1)" in result
     assert "[Discussion](https://example.com/discuss?id=1#comments)" in result
     assert 'href="https://docs.example.com/path?q=one&amp;lang=en"' in result
+
+
+def test_display_score_rounds_to_whole_numbers():
+    from src.ai.summarizer import display_score
+
+    assert display_score(7.62) == 8
+    assert display_score(5.28) == 5
+    assert display_score(6.5) == 7
+    assert display_score(8.0) == 8
+    assert display_score(None) == "?"
