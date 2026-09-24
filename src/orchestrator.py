@@ -33,7 +33,7 @@ from .ai.analyzer import ContentAnalyzer
 from .ai.decisions import create_decision_client
 from .ai.summarizer import DailySummarizer
 from .ai.enricher import ContentEnricher, EnrichmentBatchResult
-from .ai.tokens import get_usage_snapshot
+from .ai.tokens import get_usage_snapshot, usage_stage
 from .processing import ProfileRegistry
 from .processing.tools import ToolRegistry
 
@@ -407,6 +407,17 @@ class HorizonOrchestrator:
                         f"   {self.icons['detail']} {provider}: {u.total} tokens "
                         f"(in: {u.input_tokens}, out: {u.output_tokens})"
                     )
+                self.console.print("   By stage:")
+                for stage, providers in usage.per_stage.items():
+                    parts = ", ".join(
+                        f"{provider} {u.input_tokens}/{u.output_tokens}"
+                        for provider, u in sorted(providers.items())
+                        if u.total > 0
+                    )
+                    if parts:
+                        self.console.print(
+                            f"   {self.icons['detail']} {stage}: {parts} (in/out)"
+                        )
 
         except Exception as e:
             self.console.print(
@@ -674,10 +685,11 @@ class HorizonOrchestrator:
 
         try:
             ai_client = create_ai_client(self.config.ai)
-            response = await ai_client.complete(
-                system=TOPIC_DEDUP_SYSTEM,
-                user=TOPIC_DEDUP_USER.format(items=items_text),
-            )
+            with usage_stage("topic_dedup"):
+                response = await ai_client.complete(
+                    system=TOPIC_DEDUP_SYSTEM,
+                    user=TOPIC_DEDUP_USER.format(items=items_text),
+                )
             result = parse_json_response(response)
             if result is None:
                 if log:
@@ -1033,7 +1045,8 @@ class HorizonOrchestrator:
         self.console.print(
             f"   Re-analyzing {len(expanded)} Twitter items with reply context...\n"
         )
-        await self._create_analyzer().analyze_batch(expanded)
+        with usage_stage("twitter_expansion"):
+            await self._create_analyzer().analyze_batch(expanded)
 
     async def enrich_items(self, items: List[ContentItem]) -> EnrichmentBatchResult:
         """Enrich items with background knowledge (2nd AI pass).
@@ -1058,7 +1071,8 @@ class HorizonOrchestrator:
             console=self.console,
             tools=ToolRegistry(self.storage.summaries_dir),
         )
-        result = await enricher.enrich_batch(items)
+        with usage_stage("enrichment"):
+            result = await enricher.enrich_batch(items)
         self.console.print(
             f"   Enriched {result.succeeded_count}/{len(items)} items"
         )
@@ -1081,7 +1095,8 @@ class HorizonOrchestrator:
         """
         self.console.print(f"{self.icons['ai']} Analyzing content with AI...")
 
-        return await self._create_analyzer().analyze_batch(items)
+        with usage_stage("analysis"):
+            return await self._create_analyzer().analyze_batch(items)
 
     def _create_analyzer(self) -> ContentAnalyzer:
         """Build the analyzer, with the decision model when one is configured."""
