@@ -51,6 +51,19 @@ class ToolPlan(BaseModel):
 MAX_TAGS = 5
 
 
+def _lenient_tags(value: Any) -> list[str]:
+    """Accept tags as a list or a comma-separated string; drop anything else.
+
+    Tags are a by-product of enrichment: a malformed value must not make the
+    whole artifact fail validation.
+    """
+    if isinstance(value, str):
+        value = value.split(",")
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [str(tag) for tag in value if isinstance(tag, (str, int, float))]
+
+
 def clean_tags(tags: list[str]) -> list[str]:
     """Trim, de-duplicate case-insensitively and cap generated tags."""
     cleaned: list[str] = []
@@ -70,6 +83,10 @@ class GeneratedArtifact(BaseModel):
     # model scoring); otherwise the model is not asked and this stays empty.
     tags: list[str] = Field(default_factory=list)
 
+    _coerce_tags = field_validator("tags", mode="before")(
+        lambda value: _lenient_tags(value)
+    )
+
     @model_validator(mode="after")
     def validate_non_empty_content(self) -> "GeneratedArtifact":
         if not self.title.strip():
@@ -84,6 +101,10 @@ class GeneratedBlock(BaseModel):
     title: str = ""
     block: Optional[ContentBlock] = None
     tags: list[str] = Field(default_factory=list)
+
+    _coerce_tags = field_validator("tags", mode="before")(
+        lambda value: _lenient_tags(value)
+    )
 
     @model_validator(mode="after")
     def validate_non_empty_block(self) -> "GeneratedBlock":
