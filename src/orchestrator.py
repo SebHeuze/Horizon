@@ -35,6 +35,7 @@ from .ai.summarizer import DailySummarizer
 from .ai.enricher import ContentEnricher, EnrichmentBatchResult
 from .ai.tokens import get_usage_snapshot, usage_stage
 from .processing import ProfileRegistry
+from .processing.domain_age import DomainAgeChecker
 from .processing.tools import ToolRegistry
 
 
@@ -1064,12 +1065,18 @@ class HorizonOrchestrator:
             f"{self.icons['enrich']} Enriching with background knowledge..."
         )
         ai_client = create_ai_client(self.config.ai)
+        min_domain_age_days = self.config.processing.min_domain_age_days
+        domain_age = (
+            DomainAgeChecker(min_domain_age_days, self.storage.data_dir / "domain_ages.json")
+            if min_domain_age_days
+            else None
+        )
         enricher = ContentEnricher(
             ai_client,
             self.profiles,
             self.config.ai.languages,
             console=self.console,
-            tools=ToolRegistry(self.storage.summaries_dir),
+            tools=ToolRegistry(self.storage.summaries_dir, domain_age),
         )
         with usage_stage("enrichment"):
             result = await enricher.enrich_batch(items)

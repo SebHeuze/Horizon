@@ -102,6 +102,13 @@ automatic matching cannot select a profile:
 - `profile_settings`: User preferences keyed by profile ID. `threshold` accepts
   `0` through `10` or `null` for no score filter; `topic_dedup` defaults to
   `true`. Unknown profile IDs are rejected when Horizon starts.
+- `min_domain_age_days`: Drops `web_search` results whose registered domain is
+  younger than this many days, before enrichment sees them, so they can never be
+  cited as references. Mail filters silently discard messages linking to freshly
+  registered domains. Ages come from RDAP (servers found through the IANA
+  bootstrap) and are cached in `<data-dir>/domain_ages.json`; a domain whose age
+  cannot be determined — TLD without RDAP, registry error — is kept, and retried
+  after a day. Defaults to `0`, which disables the check.
 
 Each profile owns its matching, analysis, and enrichment behavior. Runtime
 filtering preferences stay in the main JSON configuration. See [Processing
