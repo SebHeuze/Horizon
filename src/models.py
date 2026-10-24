@@ -630,6 +630,8 @@ class ProcessingConfig(BaseModel):
     profiles_dir: str = "profiles"
     default_profile: str = "tech-news"
     profile_settings: Dict[str, ProfileSettingsConfig] = Field(default_factory=dict)
+    # 0 disables the check; see DomainAgeChecker.
+    min_domain_age_days: int = Field(default=0, ge=0)
 
 
 class DisplayConfig(BaseModel):

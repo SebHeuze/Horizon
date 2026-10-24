@@ -10,6 +10,7 @@ from typing import Any
 from ddgs import DDGS
 
 from ..models import ContentItem
+from .domain_age import DomainAgeChecker
 from .history import HistorySearchTool
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,9 @@ class WebSearchTool:
 
     DEFAULT_MAX_RESULTS = 3
     RESULT_LIMIT = 50
+
+    def __init__(self, domain_age: DomainAgeChecker | None = None):
+        self.domain_age = domain_age
 
     def _max_results(self, arguments: dict[str, Any]) -> int:
         """Clamp a caller-provided result count into a sane range."""
@@ -48,7 +52,7 @@ class WebSearchTool:
         except Exception as exc:
             logger.warning("web_search failed for %r: %s", query, exc)
             return []
-        return [
+        results = [
             {
                 "title": str(result.get("title", "")),
                 "url": str(result.get("href", "")),
@@ -57,14 +61,21 @@ class WebSearchTool:
             for result in (raw or [])
             if result.get("href")
         ]
+        if self.domain_age is not None:
+            results = await self.domain_age.filter_results(results)
+        return results
 
 
 class ToolRegistry:
     """Small allowlisted registry for executable profile tools."""
 
-    def __init__(self, summaries_dir: Path | None = None):
+    def __init__(
+        self,
+        summaries_dir: Path | None = None,
+        domain_age: DomainAgeChecker | None = None,
+    ):
         self._tools = {
-            WebSearchTool.name: WebSearchTool(),
+            WebSearchTool.name: WebSearchTool(domain_age),
             HistorySearchTool.name: HistorySearchTool(summaries_dir),
         }
 
