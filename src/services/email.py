@@ -10,7 +10,7 @@ import ssl
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.utils import parseaddr
+from email.utils import formatdate, make_msgid, parseaddr
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional
 
@@ -161,6 +161,17 @@ class EmailManager:
             raise
         return server
 
+    def _set_headers(self, msg, to_email: str, subject: str) -> None:
+        # smtplib does not add Date or Message-ID, and Gmail rejects mail
+        # missing either. The ID domain is the sender's, not the container's
+        # hostname.
+        sender_domain = self.config.email_address.rpartition("@")[2] or None
+        msg["Subject"] = subject
+        msg["From"] = f"{self.config.sender_name} <{self.config.email_address}>"
+        msg["To"] = to_email
+        msg["Date"] = formatdate(localtime=True)
+        msg["Message-ID"] = make_msgid(domain=sender_domain)
+
     def _dump_message(
         self,
         msg: MIMEMultipart,
@@ -239,11 +250,7 @@ class EmailManager:
 
                 for subscriber in subscribers:
                     msg = MIMEMultipart("alternative")
-                    msg["Subject"] = subject
-                    msg["From"] = (
-                        f"{self.config.sender_name} <{self.config.email_address}>"
-                    )
-                    msg["To"] = subscriber
+                    self._set_headers(msg, subscriber, subject)
 
                     text_part = MIMEText(text_body, "plain")
                     html_part = MIMEText(html_body, "html")
@@ -272,9 +279,7 @@ class EmailManager:
                 )
 
                 msg = MIMEText(body)
-                msg["Subject"] = subject
-                msg["From"] = f"{self.config.sender_name} <{self.config.email_address}>"
-                msg["To"] = to_email
+                self._set_headers(msg, to_email, subject)
 
                 server.send_message(msg)
         except Exception as e:

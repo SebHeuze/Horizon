@@ -2,6 +2,7 @@ import copy
 import io
 from email.generator import BytesGenerator
 from email.mime.multipart import MIMEMultipart
+from email.utils import parsedate_to_datetime
 
 import pytest
 
@@ -95,6 +96,43 @@ def test_send_daily_summary_falls_back_to_email_address_for_smtp_login(monkeypat
     manager.send_daily_summary("# Hello", "Daily", ["user@example.com"])
 
     assert FakeSMTP.instances[0].login_calls == [("noreply@example.com", "secret")]
+
+
+def test_send_daily_summary_sets_date_and_unique_message_id_per_subscriber(monkeypatch):
+    # Arrange
+    monkeypatch.setenv("EMAIL_PASSWORD", "secret")
+    monkeypatch.setattr("src.services.email.smtplib.SMTP_SSL", FakeSMTP)
+    FakeSMTP.instances = []
+    manager = EmailManager(_email_config())
+
+    # Act
+    manager.send_daily_summary(
+        "# Hello", "Daily", ["a@example.org", "b@example.org"]
+    )
+
+    # Assert
+    messages = FakeSMTP.instances[0].messages
+    assert all(parsedate_to_datetime(m["Date"]) for m in messages)
+    ids = [m["Message-ID"] for m in messages]
+    assert all(i.startswith("<") and i.endswith("@example.com>") for i in ids)
+    assert len(set(ids)) == 2
+
+
+def test_send_reply_sets_date_and_message_id(monkeypatch):
+    # Arrange
+    monkeypatch.setenv("EMAIL_PASSWORD", "secret")
+    monkeypatch.setattr("src.services.email.smtplib.SMTP_SSL", FakeSMTP)
+    FakeSMTP.instances = []
+    manager = EmailManager(_email_config())
+
+    # Act
+    manager._send_reply("user@example.org", "Subscribed to Horizon", "Welcome")
+
+    # Assert
+    message = FakeSMTP.instances[0].messages[0]
+    assert parsedate_to_datetime(message["Date"])
+    assert message["Message-ID"].endswith("@example.com>")
+    assert message["To"] == "user@example.org"
 
 
 def test_open_smtp_uses_starttls_outside_implicit_tls_port(monkeypatch):
